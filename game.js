@@ -1673,6 +1673,16 @@ function setupInput() {
     GAME.input.mouse.down = false;
   });
 
+  // En celulares el evento 'resize' del navegador no siempre se dispara al
+  // ocultarse/mostrarse la barra de direcciones, al rotar la pantalla, o al
+  // entrar/salir de pantalla completa — cosas que pasan constantemente en
+  // una partida. Si el canvas (buffer de dibujo) se queda con un tamaño
+  // viejo mientras su caja CSS ya cambió, todo el mundo se ve estirado o
+  // corrido: personajes, zombies, helicópteros aparecen en lugares que no
+  // corresponden al toque/clic real. ResizeObserver sí detecta CUALQUIER
+  // cambio real de tamaño del propio canvas, sea cual sea la causa.
+  const canvasResizeObserver = new ResizeObserver(() => { if (GAME.screen === 'screen-game') resizeCanvas(canvas); });
+  canvasResizeObserver.observe(canvas);
   window.addEventListener('resize', () => { if (GAME.screen === 'screen-game') resizeCanvas(canvas); });
 
   // touch stick
