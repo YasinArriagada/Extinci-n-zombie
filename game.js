@@ -345,6 +345,11 @@ function mpCreateRoom() {
         const level = GAME.level;
         if (level) mpClaimNpc(level, data.id, conn.peer);
       }
+      // Etapa 2: un invitado murió escoltando a un familiar sin entregarlo.
+      if (data.type === 'release-npc') {
+        const level = GAME.level;
+        if (level) mpReleaseNpc(level, data.id);
+      }
       // Etapa 3: un invitado pide agarrar la poción del jefe helicóptero.
       if (data.type === 'take-potion') {
         const level = GAME.level;
@@ -401,6 +406,9 @@ function mpJoinRoom(code) {
           level.zombies = data.list;
           GAME.run.kills = data.kills; GAME.run.totalKills = data.totalKills;
           level.killsThisStage = data.killsThisStage;
+          // Se ven volar las balas enemigas (antes solo las veía el Admin);
+          // acá solo se dibujan/mueven, el daño lo sigue resolviendo el Admin.
+          if (data.enemyBullets) level.enemyBullets = data.enemyBullets;
         }
       }
       if (data.type === 'enemies') {
@@ -661,6 +669,11 @@ function mpBroadcastMyState(level, dt) {
       type: 'zombies',
       list: level.zombies.map(z => ({ id: z.id, x: z.x, y: z.y, angle: z.angle, type: z.type, hp: z.hp, maxHp: z.maxHp, hit: z.hit })),
       kills: GAME.run.kills, totalKills: GAME.run.totalKills, killsThisStage: level.killsThisStage,
+      // Balas de zombies/helicópteros/jefe: se mandan para que TODOS vean
+      // que le están disparando a quien sea (no solo al Admin). No se manda
+      // el targetRef: solo el Admin aplica el daño real (ver updateBullets),
+      // el resto únicamente las dibuja volar.
+      enemyBullets: level.enemyBullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, life: b.life })),
     };
     MP.conns.forEach(c => { try { c.send(zPayload); } catch (e) { /* noop */ } });
     const ePayload = mpBuildEnemiesPayload(level);
@@ -730,6 +743,21 @@ function mpClaimNpc(level, id, requesterId) {
   n.found = true;
   n.following = true;
   n.rescuedBy = requesterId;
+  if (mpIsActive() && MP.isHost) MP.conns.forEach(c => { try { c.send(mpBuildObjectivePayload(level)); } catch (e) { /* noop */ } });
+}
+
+// Si quien lo estaba escoltando muere ANTES de entregarlo, el familiar
+// vuelve a donde estaba cuando lo encontraron y queda libre para que
+// cualquiera (el mismo jugador al reaparecer, u otro) tenga que ir a
+// rescatarlo de nuevo.
+function mpReleaseNpc(level, id) {
+  const n = level.npcs.find(nn => nn.id === id);
+  if (!n || n.delivered) return; // ya entregado: no se libera
+  n.found = false;
+  n.following = false;
+  n.rescuedBy = null;
+  n.x = n.spawnX;
+  n.y = n.spawnY;
   if (mpIsActive() && MP.isHost) MP.conns.forEach(c => { try { c.send(mpBuildObjectivePayload(level)); } catch (e) { /* noop */ } });
 }
 
@@ -1541,11 +1569,14 @@ function seedLevelEntities(level) {
     // las posiciones; los invitados las reciben (ver 'objective').
     const familyCount = mpIsActive() ? clamp(MP.players.length, 1, STAGE2_FAMILY.length) : 1;
     if (!mpIsActive() || MP.isHost) {
-      level.npcs = STAGE2_FAMILY.slice(0, familyCount).map((f, i) => ({
-        id: i, kind: f.kind, name: f.name,
-        x: rand(200, WORLD.w - 200), y: rand(200, WORLD.h - 200),
-        found: false, following: false, delivered: false, rescuedBy: null,
-      }));
+      level.npcs = STAGE2_FAMILY.slice(0, familyCount).map((f, i) => {
+        const x = rand(200, WORLD.w - 200), y = rand(200, WORLD.h - 200);
+        return {
+          id: i, kind: f.kind, name: f.name,
+          x, y, spawnX: x, spawnY: y, // spawnX/Y: a dónde vuelve si quien lo escoltaba muere
+          found: false, following: false, delivered: false, rescuedBy: null,
+        };
+      });
     }
   }
   if (stage.objectiveType === 'airBoss') {
@@ -2006,19 +2037,24 @@ function updateBullets(level, dt) {
   });
   level.bullets = level.bullets.filter(b => b.life > 0);
 
-  // colisión balas enemigas -> jugador/vehículo. Cada bala solo puede
-  // golpear al jugador al que fue dirigida (b.targetRef), nunca a otro,
-  // aunque pase cerca de alguien más.
-  level.enemyBullets.forEach(b => {
-    const t = mpResolveTargetRef(level, b.targetRef);
-    if (!t) return;
-    const r = t.isSelf ? (level.vehicle ? level.vehicle.r : 16) : 20;
-    if (dist(b.x, b.y, t.x, t.y) < r) {
-      mpDamageTarget(level, t, b.dmg);
-      b.life = 0;
-    }
-  });
-  level.enemyBullets = level.enemyBullets.filter(b => b.life > 0);
+  // colisión balas enemigas -> jugador/vehículo: SOLO la resuelve/aplica
+  // quien controla la simulación real (el Admin, o uno mismo en solitario).
+  // El resto de los clientes ya recibe la lista de balas sincronizada (ver
+  // mpBroadcastMyState) y las sigue moviendo/dibujando localmente para
+  // VERLAS volar, pero nunca aplica daño con su propia copia — así una bala
+  // nunca puede dañar a alguien que no era su blanco real.
+  if (iAmAuthoritative) {
+    level.enemyBullets.forEach(b => {
+      const t = mpResolveTargetRef(level, b.targetRef);
+      if (!t) return;
+      const r = t.isSelf ? (level.vehicle ? level.vehicle.r : 16) : 20;
+      if (dist(b.x, b.y, t.x, t.y) < r) {
+        mpDamageTarget(level, t, b.dmg);
+        b.life = 0;
+      }
+    });
+    level.enemyBullets = level.enemyBullets.filter(b => b.life > 0);
+  }
 
   // zombies muertos (solo lo decide quien controla la simulación real:
   // el Admin en multijugador, o el propio jugador en solitario)
@@ -2073,10 +2109,20 @@ function markLocalPlayerDead(level, title, sub) {
     const titleEl = document.getElementById('dead-overlay-title');
     const subEl = document.getElementById('dead-overlay-sub');
     if (titleEl) titleEl.textContent = title;
-    if (subEl) subEl.textContent = sub + ' Los enemigos ya no te atacan.';
+    if (subEl) subEl.textContent = sub + ' Los enemigos ya no te atacan. Presiona "Volver a jugar" para reaparecer aquí mismo.';
     overlay.classList.add('show');
   }
   mpSendMyStateNow(level); // avisar de inmediato, sin esperar el próximo tick
+  // Etapa 2: si estabas escoltando a un familiar sin entregar todavía, se
+  // libera donde lo encontraste — alguien va a tener que ir a rescatarlo de nuevo.
+  if (level.stage.objectiveType === 'findNPC') {
+    const myId = mpMyId();
+    const mine = level.npcs.find(n => n.rescuedBy != null && n.rescuedBy === myId && !n.delivered);
+    if (mine) {
+      if (!mpIsActive() || MP.isHost) mpReleaseNpc(level, mine.id);
+      else if (MP.hostConn) { try { MP.hostConn.send({ type: 'release-npc', id: mine.id }); } catch (e) { /* noop */ } }
+    }
+  }
 }
 
 // Revive al jugador local en el mismo lugar donde cayó, con la vida al
@@ -2168,28 +2214,32 @@ function mpDamageTarget(level, target, dmg) {
   if (target.conn) { try { target.conn.send({ type: 'damage', dmg, targetId: target.conn.peer }); } catch (e) { /* noop */ } }
 }
 
-// Cada bala enemiga se etiqueta con el jugador exacto al que apuntaba en el
-// momento de dispararse (mpTargetRef), y esa referencia es la ÚNICA que
-// puede recibir el impacto (mpResolveTargetRef). Así una bala dirigida a un
-// jugador jamás puede dañar a otro por estar cerca: el daño queda
-// individual por jugador, sin importar ráfagas en abanico o círculos.
+// Cada bala enemiga se etiqueta con el ID ABSOLUTO del jugador al que
+// apuntaba en el momento de dispararse (mpTargetRef) — no relativo a quién
+// la mire — para que, ahora que TODOS los clientes ven volar las balas (y
+// no solo el Admin), nadie la resuelva por error como "para mí" solo por
+// ser su propia perspectiva. Esa referencia es la ÚNICA que puede recibir
+// el impacto (mpResolveTargetRef), y solo el Admin (o uno mismo en
+// solitario) aplica el daño real — ver iAmAuthoritative en updateBullets.
 function mpTargetRef(t) {
-  return { isSelf: t.isSelf, peer: t.conn ? t.conn.peer : null };
+  return { id: t.isSelf ? mpMyId() : (t.conn ? t.conn.peer : null) };
 }
 
 function mpResolveTargetRef(level, ref) {
-  if (!ref || ref.isSelf) {
+  if (!ref) return null;
+  if (ref.id === mpMyId()) {
+    if (level.dead) return null; // ya eliminado: la bala no le pega a nadie
     const self = level.vehicle || level.player;
     return { x: self.x, y: self.y, isSelf: true, conn: null };
   }
   if (mpIsActive() && MP.isHost) {
-    const conn = MP.conns.find(c => c.peer === ref.peer);
+    const conn = MP.conns.find(c => c.peer === ref.id);
     if (conn) {
       const s = MP.remoteStates[conn.peer];
-      if (s) return { x: s.x, y: s.y, isSelf: false, conn };
+      if (s && !s.dead) return { x: s.x, y: s.y, isSelf: false, conn };
     }
   }
-  return null; // el jugador al que apuntaba ya no está conectado
+  return null; // el jugador al que apuntaba ya no está conectado (o ya cayó)
 }
 
 function updateFollowers(level, dt) {
