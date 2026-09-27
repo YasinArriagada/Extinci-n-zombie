@@ -1863,7 +1863,11 @@ function update(dt) {
     level.camera.y = lerp(level.camera.y, level.player.y, 0.12);
   }
 
-  checkStageCompletion(level);
+  // Un jugador eliminado no puede "completar" la etapa con su posición
+  // congelada de cuando cayó (p. ej. si murió justo parado en la zona
+  // segura). Eso lo sacaba de la pantalla de eliminado hacia la de espera
+  // sin poder volver, obligándolo a reiniciar toda la etapa para salir.
+  if (!level.dead) checkStageCompletion(level);
   updateHUD(level);
   if (mpIsActive()) mpBroadcastMyState(level, dt);
 }
@@ -2607,6 +2611,7 @@ function updateAllies(level, dt) {
 function checkStageCompletion(level) {
   if (level.subPhase === 'bossDefeatedCutscene') { runBossCutscene(level); return; }
   if (level.subPhase !== 'play') return;
+  if (level.dead) return; // eliminado: su posición está congelada, no cuenta para completar la etapa
   const stage = level.stage;
   let done = false;
   if (stage.objectiveType === 'rescue') {
