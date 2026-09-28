@@ -115,6 +115,31 @@ const STAGES = [
     palette: { ground: '#15120f', accent: '#221c17' },
     objectiveText: 'Avanza junto a tu ayudante y derrota al jefe final.',
   },
+  // BATALLA DEFINITIVA (solo multijugador): se activa cuando, tras derrotar al
+  // jefe robot de la etapa 5, el Admin responde "NO". No aparece en el salto de
+  // fase (hidden) ni en el flujo normal de etapas. Ajusta la dificultad aquí.
+  {
+    id: 6, key: 'finalx', name: 'BATALLA DEFINITIVA', hidden: true,
+    vehicleSet: null, requireWeapons: false, onFoot: true, companionSelect: true,
+    resource: null, canRepair: false,
+    objectiveType: 'finalBattle',
+    // zombies de las etapas 1, 2, 3 y 5 (walker y gunner). Sin 'rider' (etapa 4).
+    zombieTypes: ['walker', 'gunner'],
+    difficulty: {
+      bossHp: 2.2,      // vida de los 2 jefes (x2.2)
+      escortHp: 1.6,    // vida de mini aviones, mini robots y helicópteros comunes
+      speed: 1.3,       // los enemigos se mueven/disparan un 30% más rápido
+      dmg: 1.5,         // daño que reciben los jugadores (x1.5)
+      zombieHp: 1.5,    // vida de los zombies
+      zombies: 40,      // zombies simultáneos (en la etapa 5 son 26)
+      patrols: 3,       // helicópteros comunes de la etapa 3 sueltos por el mapa
+      escortPlanes: 12, // mini aviones del helicóptero jefe (en la etapa 3 son 10)
+      escortRobots: 8,  // mini robots del jefe robot (en la etapa 5 son 5)
+      shipHp: 9000,     // vida del tercer jefe: zombie con lentes en su nave (más que cualquier otro jefe)
+    },
+    palette: { ground: '#1c0f0f', accent: '#2a1414' },
+    objectiveText: 'Derrota a los dos jefes a la vez: el helicóptero principal y el zombie robótico. Después aparecerá el zombie con lentes en su nave espacial. Todos sus enemigos están de vuelta, más fuertes.',
+  },
 ];
 
 // Familia a rescatar en la Etapa 2 cuando es multijugador: la cantidad de
@@ -152,6 +177,7 @@ const GAME = {
 const STAGE_MUSIC = {
   absurd: 'Avion.mp3',        // Fase 3 — VEHÍCULOS ABSURDOS
   final: 'Music_robot.mp3',   // Fase 5 — BATALLA FINAL
+  finalx: 'Music_robot.mp3',  // BATALLA DEFINITIVA (tras el "NO" del Admin)
 };
 
 const MUSIC = new Audio();
@@ -328,6 +354,7 @@ function mpCreateRoom() {
             const m = level.miniRobots.find(mm => mm.id === data.id);
             if (m && m.alive !== false) { m.hp -= data.dmg; m.hit = 0.12; }
           }
+          if (data.kind === 'ship' && level.ship && !level.ship.invulnerable && !level.ship.defeated) { level.ship.hp -= data.dmg; level.ship.hit = 0.12; }
           if (data.kind === 'miniplane' && level.miniPlanes) {
             const m = level.miniPlanes.find(mm => mm.id === data.id);
             if (m) { m.hp -= data.dmg; m.hit = 0.12; }
@@ -417,12 +444,14 @@ function mpJoinRoom(code) {
           // Etapa 5: en cuanto el Admin derrota al jefe final, se dispara la
           // MISMA cutscene local para este jugador (cada uno la ve a su
           // propio ritmo, la decisión final llega aparte, ver 'ending').
-          const bossJustDefeated = data.boss && data.boss.defeated && level.subPhase === 'play' && !(level.boss && level.boss.defeated);
+          const bossJustDefeated = level.stage.objectiveType === 'boss' && data.boss && data.boss.defeated && level.subPhase === 'play' && !(level.boss && level.boss.defeated);
           level.heli = mpMergeSmoothOne(level.heli, data.heli);
           level.miniPlanes = mpMergeSmooth(level.miniPlanes, data.miniPlanes);
           level.boss = mpMergeSmoothOne(level.boss, data.boss);
           level.miniRobots = mpMergeSmooth(level.miniRobots, data.miniRobots);
           level.airBossDone = data.airBossDone;
+          if (data.finalPhase && data.finalPhase !== level.finalPhase) { level.finalPhase = data.finalPhase; level.shakeT = 0.25; }
+          level.ship = mpMergeSmoothOne(level.ship, data.ship || null);
           // Etapa 3: la poción del jefe helicóptero es compartida — solo el
           // Admin la crea/valida, acá solo se refleja su estado.
           if (data.potion) {
@@ -460,6 +489,8 @@ function mpJoinRoom(code) {
       // pantalla nosotros también, estemos donde estemos (jugando, leyendo
       // el papel, o ya esperando en la pantalla de decisión).
       if (data.type === 'ending') { resolveEnding(data.yes); }
+      // Batalla definitiva: el Admin derrotó al zombie con lentes en su nave.
+      if (data.type === 'final-victory') { showFinalVictory(); }
     };
     conn.on('data', data => {
       if (data.type === 'batch') { for (const m of data.msgs) handleHostData(m); }
@@ -710,6 +741,9 @@ function mpBuildEnemiesPayload(level) {
     boss: level.boss ? { x: level.boss.x, y: level.boss.y, angle: level.boss.angle, hp: level.boss.hp, maxHp: level.boss.maxHp, active: level.boss.active, defeated: level.boss.defeated, coreDefeated: level.boss.coreDefeated, invulnerable: level.boss.invulnerable, phase: level.boss.phase, hit: level.boss.hit } : null,
     miniRobots: level.miniRobots ? level.miniRobots.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), angle: +m.angle.toFixed(2), hp: m.hp, maxHp: m.maxHp, hit: m.hit, alive: true })) : null,
     airBossDone: level.airBossDone || false,
+    // Batalla definitiva: fase (1 = helicóptero + robot, 2 = nave) y el tercer jefe.
+    finalPhase: level.finalPhase || 0,
+    ship: level.ship ? { x: level.ship.x, y: level.ship.y, angle: level.ship.angle, hp: level.ship.hp, maxHp: level.ship.maxHp, phase: level.ship.phase, entering: level.ship.entering, invulnerable: level.ship.invulnerable, defeated: level.ship.defeated, hit: level.ship.hit } : null,
     // Etapa 3: la poción que suelta el jefe helicóptero, quién puede
     // agarrarla (más vida) y quién ya la tiene en mano.
     potion: potionPk ? { x: potionPk.x, y: potionPk.y, taken: potionPk.taken } : null,
@@ -821,7 +855,7 @@ function mpSmoothStep(level, dt) {
     if (e.ta !== undefined && e.angle !== undefined) e.angle = lerpAngle(e.angle, e.ta, k);
   };
   level.zombies.forEach(step);
-  step(level.heli); step(level.boss);
+  step(level.heli); step(level.boss); step(level.ship);
   if (level.miniPlanes) level.miniPlanes.forEach(step);
   if (level.miniRobots) level.miniRobots.forEach(step);
 }
@@ -926,6 +960,7 @@ function handleAction(action) {
     case 'controller-reveal-continue': showPotionChoiceScreen(); break;
     case 'potion-yes': mpChooseEnding(true); break;
     case 'potion-no': mpChooseEnding(false); break;
+    case 'final-victory-continue': resolveEnding(true); break; // solo local: cada jugador pasa al final bueno a su ritmo
     case 'force-fullscreen': requestGameFullscreen(true); break;
   }
 }
@@ -948,6 +983,7 @@ function buildPhaseGrid() {
   grid.innerHTML = '';
   document.getElementById('btn-phase-next').disabled = true;
   STAGES.forEach((stage, i) => {
+    if (stage.hidden) return; // la batalla definitiva solo se alcanza con el "NO" del Admin
     const card = document.createElement('div');
     card.className = 'pick-card';
     card.innerHTML = `<canvas class="pick-card-canvas" width="180" height="100"></canvas>
@@ -1540,6 +1576,7 @@ function startStageGameplay() {
     interactTarget: null,
     dead: false, // true cuando ESTE jugador (local) fue eliminado, en multijugador
     potionEligible: null, potionHolder: null, // etapa 3: quién puede/ya agarró la poción
+    diff: stage.difficulty || null, // multiplicadores de dificultad (solo la batalla definitiva)
   };
 
   if (stage.onFoot) {
@@ -1605,7 +1642,7 @@ function generateDecor(stage) {
 
 function seedLevelEntities(level) {
   const { stage } = level;
-  const zombieCount = { dino: 18, tank: 22, absurd: 16, animal: 24, final: 26 }[stage.key];
+  const zombieCount = (level.diff && level.diff.zombies) || { dino: 18, tank: 22, absurd: 16, animal: 24, final: 26 }[stage.key];
   for (let i = 0; i < zombieCount; i++) spawnZombie(level);
 
   if (stage.objectiveType === 'rescue') {
@@ -1655,6 +1692,44 @@ function seedLevelEntities(level) {
       };
     });
   }
+  if (stage.objectiveType === 'finalBattle') {
+    // Los DOS jefes a la vez, desde el primer segundo: el helicóptero de la
+    // etapa 3 (con escudo hasta eliminar a sus mini aviones) y el robot de la
+    // etapa 5 (invulnerable hasta eliminar a sus mini robots).
+    const D = level.diff;
+    level.helisSpawned = 5; level.heliTimer = 0; // sin oleadas: el jefe ya está en el mapa
+    const heliHp = Math.round(1300 * D.bossHp);
+    level.heli = {
+      x: WORLD.w * 0.22, y: 420, hp: heliHp, maxHp: heliHp,
+      isBoss: true, active: true, cd: 1.5, hit: 0, vx: rand(-40, 40), vy: rand(-40, 40), shielded: true,
+    };
+    level.miniPlanes = Array.from({ length: D.escortPlanes }, (_, i) => {
+      const orbitAngle = (i / D.escortPlanes) * Math.PI * 2;
+      const hp = Math.round(35 * D.escortHp);
+      return {
+        id: i, x: level.heli.x + Math.cos(orbitAngle) * 130, y: level.heli.y + Math.sin(orbitAngle) * 130,
+        hp, maxHp: hp, orbitAngle, orbitSpeed: rand(0.6, 1.0) * (Math.random() < 0.5 ? 1 : -1),
+        orbitR: rand(110, 165), angle: 0, cd: rand(0, 1.2), hit: 0, alive: true,
+      };
+    });
+    const robotHp = Math.round(1500 * D.bossHp);
+    level.boss = {
+      x: WORLD.w * 0.72, y: 260, hp: robotHp, maxHp: robotHp, phase: 1, active: true,
+      angle: 0, cd: 1.5, moveT: 0, defeated: false, coreDefeated: false,
+    };
+    level.miniRobots = Array.from({ length: D.escortRobots }, (_, i) => {
+      const orbitAngle = (i / D.escortRobots) * Math.PI * 2;
+      const hp = Math.round(80 * D.escortHp);
+      return {
+        id: i, x: level.boss.x + Math.cos(orbitAngle) * 100, y: level.boss.y + Math.sin(orbitAngle) * 100,
+        hp, maxHp: hp, orbitAngle, orbitSpeed: rand(0.5, 0.9) * (Math.random() < 0.5 ? 1 : -1),
+        orbitR: rand(85, 120), angle: 0, cd: rand(0, 1), hit: 0, alive: true,
+      };
+    });
+    // helicópteros comunes de la etapa 3, sueltos por el mapa (se reponen solos)
+    level.patrolTimer = 6;
+    for (let i = 0; i < D.patrols; i++) spawnPatrolHeli(level);
+  }
   if (stage.resource) {
     for (let i = 0; i < 9; i++) {
       level.pickups.push({ x: rand(100, WORLD.w - 100), y: rand(100, WORLD.h - 100), kind: 'resource', taken: false });
@@ -1671,9 +1746,10 @@ function spawnZombie(level) {
   else if (edge === 2) { x = 0; y = rand(0, WORLD.h); }
   else { x = WORLD.w; y = rand(0, WORLD.h); }
   level.nextZombieId = (level.nextZombieId || 0) + 1;
+  const zhp = level.diff ? level.diff.zombieHp : 1;
   level.zombies.push({
     id: level.nextZombieId,
-    x, y, type, hp: type === 'rider' ? 60 : 42, maxHp: type === 'rider' ? 60 : 42,
+    x, y, type, hp: Math.round((type === 'rider' ? 60 : 42) * zhp), maxHp: Math.round((type === 'rider' ? 60 : 42) * zhp),
     speed: type === 'rider' ? rand(110, 150) : rand(48, 82),
     angle: 0, cd: rand(0, 1), hit: 0, alive: true,
   });
@@ -1913,14 +1989,18 @@ function update(dt) {
     updateWeapons(level, dt);
   } else if (level.player.invuln > 0) { level.player.invuln -= dt; }
   updateBullets(level, dt);
-  if (!mpIsActive() || MP.isHost) updateZombies(level, dt);
+  // En la batalla definitiva los enemigos corren con un dt mayor (más rápidos
+  // y con menos tiempo de recarga). En el resto de etapas edt === dt.
+  const edt = dt * (level.diff ? level.diff.speed : 1);
+  if (!mpIsActive() || MP.isHost) updateZombies(level, edt);
   updateFollowers(level, dt);
   updatePickups(level);
   if (!mpIsActive() || MP.isHost) {
-    if (stage.objectiveType === 'airBoss') updateHelis(level, dt);
-    if (level.miniPlanes) updateMiniPlanes(level, dt);
-    if (stage.objectiveType === 'boss') updateBoss(level, dt);
-    if (level.miniRobots) updateMiniRobots(level, dt);
+    if (stage.objectiveType === 'airBoss' || stage.objectiveType === 'finalBattle') updateHelis(level, edt);
+    if (level.miniPlanes) updateMiniPlanes(level, edt);
+    if (stage.objectiveType === 'boss' || stage.objectiveType === 'finalBattle') updateBoss(level, edt);
+    if (level.miniRobots) updateMiniRobots(level, edt);
+    if (stage.objectiveType === 'finalBattle') { updateShip(level, edt); updateFinalBattle(level, dt); }
   }
   if (level.companion) updateCompanion(level, dt);
   if (level.allies) updateAllies(level, dt);
@@ -2070,6 +2150,15 @@ function updateBullets(level, dt) {
         if (!level.boss.invulnerable) {
           if (iAmAuthoritative) { level.boss.hp -= b.dmg; level.boss.hit = 0.12; }
           else if (MP.hostConn) { try { MP.hostConn.send({ type: 'ehit', kind: 'boss', dmg: b.dmg }); } catch (e) { /* noop */ } }
+        }
+      }
+    }
+    if (level.ship && !level.ship.defeated && !b.allyBullet) {
+      if (dist(b.x, b.y, level.ship.x, level.ship.y) < 62) {
+        b.life = 0; // el impacto se bloquea igual, para dar feedback visual
+        if (!level.ship.invulnerable) {
+          if (iAmAuthoritative) { level.ship.hp -= b.dmg; level.ship.hit = 0.12; }
+          else if (MP.hostConn) { try { MP.hostConn.send({ type: 'ehit', kind: 'ship', dmg: b.dmg }); } catch (e) { /* noop */ } }
         }
       }
     }
@@ -2283,6 +2372,7 @@ function mpNearestTarget(z, targets) {
 }
 
 function mpDamageTarget(level, target, dmg) {
+  if (level.diff) dmg = dmg * level.diff.dmg; // batalla definitiva: todo el daño enemigo es mayor
   if (target.isSelf) { damagePlayerOrVehicle(level, dmg); return; }
   if (target.conn) { try { target.conn.send({ type: 'damage', dmg, targetId: target.conn.peer }); } catch (e) { /* noop */ } }
 }
@@ -2424,14 +2514,16 @@ function updateHelis(level, dt) {
 
     if (h.hp <= 0) {
       if (h.isBoss) {
-        level.pickups.push({ x: h.x, y: h.y, kind: 'potion', taken: false, r: 20 });
+        const isFinalBattle = level.stage.objectiveType === 'finalBattle';
+        if (!isFinalBattle) level.pickups.push({ x: h.x, y: h.y, kind: 'potion', taken: false, r: 20 });
         level.airBossDone = true;
-        level.miniPlanes = [];
+        // etapa 3: se limpian todos los escoltas; batalla definitiva: los helicópteros comunes siguen
+        level.miniPlanes = isFinalBattle ? level.miniPlanes.filter(m => m.patrol) : [];
         // Etapa 3: se calcula UNA sola vez, en este momento, quién tiene la
         // vida más alta de la partida — solo esos jugadores podrán agarrar
         // la poción (empate = cualquiera de ellos, potionEligible queda con
         // todos los empatados). En solitario no aplica ninguna restricción.
-        if (mpIsActive()) {
+        if (mpIsActive() && !isFinalBattle) {
           const selfHp = level.vehicle ? level.vehicle.hp : level.player.hp;
           const candidates = level.dead ? [] : [{ id: mpMyId(), hp: selfHp }];
           if (MP.isHost) {
@@ -2458,11 +2550,32 @@ function updateHelis(level, dt) {
 function updateMiniPlanes(level, dt) {
   if (!level.miniPlanes || !level.miniPlanes.length) return;
   const h = level.heli;
-  if (!h || !h.isBoss || h.hp <= 0) { level.miniPlanes = []; return; }
-  const target = mpNearestTarget(h, mpGetAllTargets(level));
+  const bossUp = !!(h && h.isBoss && h.hp > 0);
+  // Sin helicóptero jefe vivo los escoltas se retiran; los helicópteros comunes
+  // ("patrol", solo en la batalla definitiva) siguen por su cuenta.
+  if (!bossUp) {
+    level.miniPlanes = level.miniPlanes.filter(m => m.patrol);
+    if (!level.miniPlanes.length) return;
+  }
+  const targets = mpGetAllTargets(level);
   level.miniPlanes.forEach(m => {
     if (!m.alive) return;
     m.hit = Math.max(0, m.hit - dt);
+    if (m.patrol) {
+      // helicóptero común de la etapa 3: se mueve a los tirones y dispara al blanco más cercano
+      m.x = clamp(m.x + m.vx * dt, 100, WORLD.w - 100);
+      m.y = clamp(m.y + m.vy * dt, 100, WORLD.h - 100);
+      if (Math.random() < 0.01) { m.vx = rand(-50, 50); m.vy = rand(-50, 50); }
+      const pt = mpNearestTarget(m, targets);
+      m.angle = angleTo(m.x, m.y, pt.x, pt.y);
+      m.cd -= dt;
+      if (dist(m.x, m.y, pt.x, pt.y) < 420 && m.cd <= 0) {
+        m.cd = 1.1;
+        level.enemyBullets.push({ x: m.x, y: m.y, vx: Math.cos(m.angle) * 220, vy: Math.sin(m.angle) * 220, dmg: 10, life: 2.4, targetRef: mpTargetRef(pt) });
+      }
+      return;
+    }
+    const target = mpNearestTarget(h, targets);
     m.orbitAngle += m.orbitSpeed * dt;
     m.x = lerp(m.x, h.x + Math.cos(m.orbitAngle) * m.orbitR, 0.12);
     m.y = lerp(m.y, h.y + Math.sin(m.orbitAngle) * m.orbitR, 0.12);
@@ -2482,7 +2595,8 @@ function updateMiniPlanes(level, dt) {
     }
   });
   level.miniPlanes = level.miniPlanes.filter(m => m.alive);
-  if (h.isBoss && h.shielded && level.miniPlanes.length === 0) h.shielded = false;
+  // el escudo del jefe solo depende de sus escoltas, no de los helicópteros comunes
+  if (h && h.isBoss && h.shielded && !level.miniPlanes.some(m => !m.patrol)) h.shielded = false;
 }
 
 /* --------- Jefe final (etapa 5) --------- */
@@ -2563,9 +2677,13 @@ function updateBoss(level, dt) {
 
   if (b.hp <= 0 && !b.defeated) {
     b.defeated = true;
-    level.subPhase = 'bossDefeatedCutscene';
-    level.cutsceneT = 0;
-    stopBossMusic();
+    if (level.stage.objectiveType === 'boss') {
+      level.subPhase = 'bossDefeatedCutscene';
+      level.cutsceneT = 0;
+      stopBossMusic();
+    } else {
+      spawnDeathParticles(level, b.x, b.y); // batalla definitiva: la victoria la decide updateFinalBattle
+    }
   }
 }
 
@@ -2721,7 +2839,8 @@ function advanceStage() {
   stopBossMusic();
   if (mpIsActive()) MP.readyChoices = {}; // que no queden "listos" de la fase anterior
   GAME.selection.vehicle = null; // que nadie arranque la fase nueva con la montura vieja
-  const isLast = GAME.stageIndex >= STAGES.length - 1;
+  const nextStage = STAGES[GAME.stageIndex + 1];
+  const isLast = !nextStage || nextStage.hidden; // la batalla definitiva no es una etapa "siguiente" normal
   if (isLast) { return; } // el final se gestiona vía la poción
   GAME.stageIndex++;
   openVehicleSelectForCurrentStage();
@@ -2754,10 +2873,245 @@ function resolveEnding(yes) {
   if (yes) {
     buildGoodEndScene();
     showScreen('screen-good-end');
+  } else if (mpIsActive()) {
+    // Multijugador: el "NO" del Admin manda a TODOS a la batalla definitiva
+    // (llega igual a invitados y Admin, ver mpChooseEnding y el manejador de 'ending').
+    startFinalBattle();
   } else {
     buildBadEndScene();
     showScreen('screen-bad-end');
   }
+}
+
+/* ------------------- BATALLA DEFINITIVA (multijugador) --------------------- */
+
+// Todos los jugadores conservan personaje, armas y ayudante de la etapa 5; se
+// reutiliza el mismo arranque sincronizado de las etapas (pantalla de intro y
+// gameplay a los ~1.8 s).
+function startFinalBattle() {
+  const idx = STAGES.findIndex(st => st.objectiveType === 'finalBattle');
+  if (idx < 0) { buildBadEndScene(); showScreen('screen-bad-end'); return; }
+  stopBossMusic();
+  GAME.stageIndex = idx;
+  GAME.selection.vehicle = null;
+  GAME.paused = false;
+  MP.readyChoices = {}; MP.stageDone = {}; MP.remoteStates = {};
+  mpStartStageForAll();
+}
+
+// Repone los helicópteros comunes y decide el avance de la batalla (solo corre el Admin):
+// fase 1 = helicóptero + robot; fase 2 = zombie con lentes en su nave espacial.
+function updateFinalBattle(level, dt) {
+  if (level.subPhase !== 'play') return;
+  const D = level.diff;
+  const robotDown = !!(level.boss && level.boss.defeated);
+  if (level.airBossDone && robotDown && !level.ship) { spawnShip(level); return; }
+  if (level.ship && level.ship.defeated) { finishFinalBattle(level); return; }
+  level.patrolTimer -= dt;
+  if (level.patrolTimer <= 0) {
+    level.patrolTimer = 7;
+    const patrols = level.miniPlanes ? level.miniPlanes.filter(m => m.patrol).length : 0;
+    if (patrols < D.patrols) spawnPatrolHeli(level);
+  }
+}
+
+// TERCER JEFE: el zombie con lentes baja del cielo en su nave espacial, apenas
+// mueren el helicóptero y el robot. Es invulnerable mientras hace su entrada.
+function spawnShip(level) {
+  const D = level.diff;
+  level.finalPhase = 2;
+  level.shakeT = 0.25;
+  level.ship = {
+    x: WORLD.w / 2, y: -160, hp: D.shipHp, maxHp: D.shipHp, phase: 1,
+    angle: Math.PI / 2, cd: 2, moveT: 0, hit: 0, entering: true, invulnerable: true, defeated: false,
+    dashT: 0, dashVX: 0, dashVY: 0, spin: 0, summonT: 8, lastPhase: 1,
+  };
+}
+
+function updateShip(level, dt) {
+  const sh = level.ship; if (!sh || sh.defeated) return;
+  sh.hit = Math.max(0, sh.hit - dt);
+  if (sh.hp <= 0) { sh.defeated = true; spawnDeathParticles(level, sh.x, sh.y); return; }
+  const targets = mpGetAllTargets(level);
+  const nearest = mpNearestTarget(sh, targets);
+  // entrada: desciende desde arriba del mapa (invulnerable)
+  if (sh.entering) {
+    sh.y += 110 * dt;
+    if (sh.y >= 340) { sh.y = 340; sh.entering = false; sh.invulnerable = false; }
+    return;
+  }
+  const hpPct = sh.hp / sh.maxHp;
+  sh.phase = hpPct <= 0.33 ? 3 : hpPct <= 0.66 ? 2 : 1;
+  if (sh.phase !== sh.lastPhase) {
+    // al cambiar de fase: sacude la pantalla y llama refuerzos
+    sh.lastPhase = sh.phase;
+    level.shakeT = 0.25;
+    for (let i = 0; i < 8; i++) spawnZombie(level);
+  }
+  sh.moveT += dt;
+  // se lanza contra los jugadores cada vez más seguido
+  if (sh.dashT > 0) {
+    sh.dashT -= dt;
+    sh.x = clamp(sh.x + sh.dashVX * dt, 150, WORLD.w - 150);
+    sh.y = clamp(sh.y + sh.dashVY * dt, 150, WORLD.h - 150);
+  } else {
+    const dashChance = sh.phase === 3 ? 0.03 : sh.phase === 2 ? 0.018 : 0.01;
+    if (Math.random() < dashChance) {
+      const a = angleTo(sh.x, sh.y, nearest.x, nearest.y) + rand(-0.6, 0.6);
+      const sp = sh.phase === 3 ? 340 : 260;
+      sh.dashVX = Math.cos(a) * sp; sh.dashVY = Math.sin(a) * sp; sh.dashT = 0.45;
+    } else {
+      sh.x = clamp(sh.x + Math.sin(sh.moveT * 0.9) * 70 * dt, 150, WORLD.w - 150);
+      const d = dist(nearest.x, nearest.y, sh.x, sh.y);
+      sh.y = clamp(sh.y + 55 * dt * (d > 380 ? 1 : -1), 150, WORLD.h - 150);
+    }
+  }
+  sh.angle = angleTo(sh.x, sh.y, nearest.x, nearest.y);
+  sh.spin += dt * (1.2 + sh.phase * 0.6);
+  sh.cd -= dt;
+
+  // refuerzos periódicos de zombies (más seguido en las últimas fases)
+  sh.summonT -= dt;
+  if (sh.summonT <= 0) {
+    sh.summonT = sh.phase === 3 ? 7 : 11;
+    for (let i = 0; i < 4; i++) spawnZombie(level);
+  }
+
+  if (sh.cd > 0 || level.enemyBullets.length > 260) return; // tope de balas: cuida el rendimiento de la red
+  const ph = sh.phase;
+  const spd = 250 + ph * 45;
+  sh.cd = ph === 3 ? 0.4 : ph === 2 ? 0.55 : 0.75;
+  const ref = mpTargetRef(nearest);
+  const shoot = (a, sp, dmg, life) => level.enemyBullets.push({ x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, dmg, life: life || 2.8, targetRef: ref });
+  const pattern = randi(0, ph === 1 ? 2 : 4);
+  if (pattern === 0) {                 // ráfaga apuntada
+    for (let i = 0; i < 4 + ph * 2; i++) shoot(sh.angle + rand(-0.07, 0.07), spd + i * 12, 10);
+  } else if (pattern === 1) {          // abanico amplio
+    const count = 7 + ph * 2, arc = 1.3;
+    for (let i = 0; i < count; i++) shoot(sh.angle - arc / 2 + (arc / (count - 1)) * i, spd, 8);
+  } else if (pattern === 2) {          // volley circular
+    const count = 12 + ph * 4;
+    for (let i = 0; i < count; i++) shoot((Math.PI * 2 / count) * i + sh.spin, spd * 0.8, 7, 3);
+  } else if (pattern === 3) {          // espiral de 3 brazos
+    for (let arm = 0; arm < 3; arm++) for (let k = 0; k < 4; k++) shoot(sh.spin * 2 + arm * (Math.PI * 2 / 3) + k * 0.16, spd * (0.7 + k * 0.1), 7, 3);
+  } else {                             // lluvia dirigida: dos abanicos cruzados a los lados del blanco
+    for (let i = 0; i < 6; i++) { shoot(sh.angle + 0.5 + i * 0.05, spd, 8); shoot(sh.angle - 0.5 - i * 0.05, spd, 8); }
+  }
+}
+
+function spawnPatrolHeli(level) {
+  const D = level.diff;
+  if (!level.miniPlanes) level.miniPlanes = [];
+  level.nextPatrolId = (level.nextPatrolId || 100) + 1;
+  const edge = randi(0, 3);
+  let x, y;
+  if (edge === 0) { x = rand(150, WORLD.w - 150); y = 150; }
+  else if (edge === 1) { x = rand(150, WORLD.w - 150); y = WORLD.h - 150; }
+  else if (edge === 2) { x = 150; y = rand(150, WORLD.h - 150); }
+  else { x = WORLD.w - 150; y = rand(150, WORLD.h - 150); }
+  const hp = Math.round(60 * D.escortHp);
+  level.miniPlanes.push({
+    id: level.nextPatrolId, x, y, angle: 0, hp, maxHp: hp, patrol: true,
+    vx: rand(-40, 40), vy: rand(-40, 40), cd: rand(0.5, 1.5), hit: 0, alive: true,
+  });
+}
+
+// Nave destruida: el Admin avisa a todos y aparece la escena final del zombie
+// con lentes junto a su nave destruida. Desde ahí cada jugador pasa al final bueno.
+function finishFinalBattle(level) {
+  level.subPhase = 'complete';
+  if (mpIsActive() && MP.isHost) MP.conns.forEach(c => { try { c.send({ type: 'final-victory' }); } catch (e) { /* noop */ } });
+  showFinalVictory();
+}
+
+function showFinalVictory() {
+  cancelAnimationFrame(GAME.rafId);
+  stopBossMusic();
+  buildFinalVictoryScene();
+  showScreen('screen-final-victory');
+}
+
+// Zombie con lentes (mismo diseño que en la escena del papel), reutilizable.
+function drawGlassesZombie(ctx, x, y, scale) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  drawZombie(ctx, 0, 0, 0, 'walker', 0);
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.rect(-6.2, -16.5, 4.6, 4.6);
+  ctx.rect(1.6, -16.5, 4.6, 4.6);
+  ctx.moveTo(-1.6, -14.2); ctx.lineTo(1.6, -14.2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Nave espacial del tercer jefe. wreck = true la dibuja inclinada, rota y humeante.
+function drawShip(ctx, x, y, hpPct, hit, t, invulnerable, wreck) {
+  ctx.save();
+  ctx.translate(x, y);
+  if (wreck) ctx.rotate(-0.28);
+  if (invulnerable && !wreck) {
+    const pulse = 1 + Math.sin(Date.now() / 150) * 0.07;
+    ctx.strokeStyle = 'rgba(190,120,255,0.6)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, 78 * pulse, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(0, 52, 62, 12, 0, 0, Math.PI * 2); ctx.fill();
+  // cúpula de cristal con el zombie con lentes adentro
+  ctx.fillStyle = wreck ? 'rgba(120,150,170,0.35)' : 'rgba(150,220,255,0.35)';
+  ctx.beginPath(); ctx.arc(0, -8, 26, Math.PI, 0); ctx.fill();
+  ctx.strokeStyle = '#9fb8c8'; ctx.lineWidth = 2; ctx.stroke();
+  if (!wreck) drawGlassesZombie(ctx, 0, -6, 1.15);
+  // casco
+  ctx.fillStyle = hit > 0 ? '#fff' : (wreck ? '#3a3d44' : '#585c68');
+  ctx.beginPath(); ctx.ellipse(0, 4, 66, 20, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = wreck ? '#25272c' : '#3c3f4a';
+  ctx.beginPath(); ctx.ellipse(0, 12, 50, 12, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(0, 4, 66, 20, 0, 0, Math.PI * 2); ctx.stroke();
+  // luces (giran; en el jefe cambian de color según su vida)
+  const lc = hpPct > 0.66 ? '#9dfb4c' : hpPct > 0.33 ? '#e0b13f' : '#d1272d';
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + t * 2;
+    ctx.fillStyle = wreck ? '#2a2a2a' : lc;
+    if (!wreck) { ctx.shadowColor = lc; ctx.shadowBlur = 10; }
+    ctx.beginPath(); ctx.arc(Math.cos(a) * 50, 5 + Math.sin(a) * 9, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  if (wreck) {
+    // grietas y chispas
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-20, -6); ctx.lineTo(-8, 8); ctx.lineTo(-18, 18); ctx.moveTo(24, -2); ctx.lineTo(12, 10); ctx.stroke();
+    ctx.strokeStyle = 'rgba(224,177,63,0.7)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-40, 0); ctx.lineTo(-52, -14); ctx.moveTo(44, 2); ctx.lineTo(58, -10); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Escena final: el zombie con lentes junto a su nave destruida.
+function buildFinalVictoryScene() {
+  const el = document.getElementById('final-victory-scene');
+  el.innerHTML = '';
+  const cv = document.createElement('canvas'); cv.width = 340; cv.height = 180; el.appendChild(cv);
+  const ctx = cv.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 180); g.addColorStop(0, '#0d0c18'); g.addColorStop(1, '#1c1a14');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 340, 180);
+  // estrellas
+  ctx.fillStyle = 'rgba(233,230,214,0.6)';
+  for (let i = 0; i < 40; i++) { ctx.beginPath(); ctx.arc(rand(0, 340), rand(0, 90), rand(0.4, 1.2), 0, Math.PI * 2); ctx.fill(); }
+  // suelo
+  ctx.fillStyle = '#15120f'; ctx.fillRect(0, 140, 340, 40);
+  // humo de la nave
+  for (let i = 0; i < 9; i++) {
+    ctx.fillStyle = `rgba(90,90,90,${0.28 - i * 0.025})`;
+    ctx.beginPath(); ctx.arc(110 + rand(-8, 8) + i * 2, 88 - i * 9, 8 + i * 2.2, 0, Math.PI * 2); ctx.fill();
+  }
+  drawShip(ctx, 105, 118, 0, 0, 0, false, true);
+  // el zombie con lentes, de pie junto a los restos
+  drawGlassesZombie(ctx, 235, 132, 2.2);
+  // chispas
+  ctx.fillStyle = 'rgba(224,177,63,0.6)';
+  for (let i = 0; i < 16; i++) { ctx.beginPath(); ctx.arc(rand(40, 190), rand(80, 150), rand(0.5, 1.6), 0, Math.PI * 2); ctx.fill(); }
 }
 
 function buildGoodEndScene() {
@@ -2877,6 +3231,7 @@ function render() {
   if (level.miniPlanes) level.miniPlanes.forEach(m => { if (m.alive) drawHeli(ctx, m.x, m.y, level.time, m.hit, false); });
   if (level.boss && level.boss.active && !level.boss.defeated) drawBoss(ctx, level.boss.x, level.boss.y, level.boss.hp / level.boss.maxHp, level.boss.hit || 0, 1, level.boss.invulnerable);
   if (level.miniRobots && level.boss && level.boss.active && !level.boss.defeated) level.miniRobots.forEach(m => drawBoss(ctx, m.x, m.y, m.hp / m.maxHp, m.hit, 0.42));
+  if (level.ship && !level.ship.defeated) drawShip(ctx, level.ship.x, level.ship.y, level.ship.hp / level.ship.maxHp, level.ship.hit || 0, level.time, level.ship.invulnerable, false);
 
   level.bullets.forEach(b => { ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
   level.enemyBullets.forEach(b => { ctx.fillStyle = '#d1272d'; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); });
@@ -2925,8 +3280,14 @@ function render() {
       drawOffscreenIndicators(ctx, camX, camY, w, h, [n], '#e9e6d6', n.following ? n.name : `${n.name} PERDIDO/A`, zoom);
     });
   }
-  if (level.stage.objectiveType === 'airBoss' && level.heli && level.heli.active) {
+  if ((level.stage.objectiveType === 'airBoss' || level.stage.objectiveType === 'finalBattle') && level.heli && level.heli.active) {
     drawOffscreenIndicators(ctx, camX, camY, w, h, [level.heli], level.heli.isBoss ? '#ff5050' : '#e0b13f', level.heli.isBoss ? 'HELI JEFE' : 'HELICÓPTERO', zoom);
+  }
+  if (level.stage.objectiveType === 'finalBattle' && level.boss && level.boss.active && !level.boss.defeated) {
+    drawOffscreenIndicators(ctx, camX, camY, w, h, [level.boss], '#ff5050', 'ROBOT JEFE', zoom);
+  }
+  if (level.ship && !level.ship.defeated) {
+    drawOffscreenIndicators(ctx, camX, camY, w, h, [level.ship], '#c07aff', 'NAVE JEFE', zoom);
   }
 
   drawMinimap(level);
@@ -3034,7 +3395,8 @@ function drawMinimap(level) {
     ctx.fillStyle = '#e0b13f';
     level.miniPlanes.forEach(m => { if (m.alive) ctx.fillRect(m.x * sx - 1, m.y * sy - 1, 2, 2); });
   }
-  if (level.boss) { ctx.fillStyle = '#ff5050'; ctx.fillRect(level.boss.x * sx - 3, level.boss.y * sy - 3, 6, 6); }
+  if (level.boss && !level.boss.defeated) { ctx.fillStyle = '#ff5050'; ctx.fillRect(level.boss.x * sx - 3, level.boss.y * sy - 3, 6, 6); }
+  if (level.ship && !level.ship.defeated) { ctx.fillStyle = '#c07aff'; ctx.beginPath(); ctx.arc(level.ship.x * sx, level.ship.y * sy, 4, 0, Math.PI * 2); ctx.fill(); }
   if (level.miniRobots && level.boss && level.boss.active) {
     ctx.fillStyle = '#e07a50';
     level.miniRobots.forEach(m => { ctx.fillRect(m.x * sx - 1.5, m.y * sy - 1.5, 3, 3); });
@@ -3072,7 +3434,27 @@ function updateBossHUD(level) {
   const label = document.getElementById('hud-boss-label');
   const bar = document.getElementById('hud-boss-hp');
   const h = level.heli, b = level.boss;
-  if (level.stage.objectiveType === 'airBoss' && h && h.isBoss) {
+  if (level.stage.objectiveType === 'finalBattle' && level.ship && !level.ship.defeated) {
+    const sh = level.ship;
+    hud.classList.add('show');
+    label.textContent = sh.entering
+      ? 'EL ZOMBIE CON LENTES DESCIENDE EN SU NAVE...'
+      : (sh.phase === 3 ? 'ZOMBIE CON LENTES — NAVE (FURIA TOTAL)' : sh.phase === 2 ? 'ZOMBIE CON LENTES — NAVE (ALERTA)' : 'ZOMBIE CON LENTES — NAVE ESPACIAL');
+    bar.style.width = clamp(sh.hp / sh.maxHp * 100, 0, 100) + '%';
+  } else if (level.stage.objectiveType === 'finalBattle') {
+    const D = level.diff;
+    const heliUp = !!(h && h.isBoss && h.hp > 0 && !level.airBossDone);
+    const robotUp = !!(b && !b.defeated);
+    if (!heliUp && !robotUp) { hud.classList.remove('show'); return; }
+    hud.classList.add('show');
+    const heliTxt = heliUp ? (h.shielded ? 'ESCUDO ACTIVO' : Math.max(0, Math.round(h.hp / h.maxHp * 100)) + '%') : 'DERROTADO';
+    const escorted = !!(level.miniRobots && level.miniRobots.length > 0);
+    const robotTxt = robotUp ? (escorted ? 'PROTEGIDO' : Math.max(0, Math.round(b.hp / b.maxHp * 100)) + '%') : 'DERROTADO';
+    label.textContent = `HELICÓPTERO: ${heliTxt}  ·  ROBOT: ${robotTxt}`;
+    const total = (1300 + 1500) * D.bossHp;
+    const cur = (heliUp ? h.hp : 0) + (robotUp ? b.hp : 0);
+    bar.style.width = clamp(cur / total * 100, 0, 100) + '%';
+  } else if (level.stage.objectiveType === 'airBoss' && h && h.isBoss) {
     hud.classList.add('show');
     label.textContent = h.shielded
       ? 'HELICÓPTERO PRINCIPAL — ESCUDO ACTIVO (elimina a los mini aviones)'
@@ -3144,6 +3526,11 @@ function updateHUD(level) {
     document.getElementById('hud-objective').textContent = text;
   } else if (level.stage.objectiveType === 'boss') {
     document.getElementById('hud-objective').textContent = level.boss.active ? 'Derrota al jefe final' : 'Avanza hacia el norte del mapa';
+  } else if (level.stage.objectiveType === 'finalBattle') {
+    const bossesDown = (level.airBossDone ? 1 : 0) + (level.boss && level.boss.defeated ? 1 : 0);
+    document.getElementById('hud-objective').textContent = level.ship
+      ? 'BATALLA DEFINITIVA — Derrota al zombie con lentes en su nave espacial'
+      : `BATALLA DEFINITIVA — Jefes derrotados: ${bossesDown}/2 (helicóptero y robot); luego aparece el jefe final`;
   }
 }
 
