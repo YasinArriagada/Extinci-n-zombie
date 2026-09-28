@@ -296,7 +296,7 @@ function mpCreateRoom() {
         mpHostReceiveStageDone(conn.peer);
       }
       if (data.type === 'pos') {
-        MP.remoteStates[data.id] = data;
+        mpStoreRemote(data);
         MP.conns.forEach(c => { if (c !== conn) { try { c.send(data); } catch (e) { /* noop */ } } });
         // Etapa 2: este invitado está escoltando a un familiar, se actualiza
         // su posición en la copia del Admin (que es la que se reenvía).
@@ -326,7 +326,7 @@ function mpCreateRoom() {
           }
           if (data.kind === 'minirobot' && level.miniRobots) {
             const m = level.miniRobots.find(mm => mm.id === data.id);
-            if (m) { m.hp -= data.dmg; m.hit = 0.12; }
+            if (m && m.alive !== false) { m.hp -= data.dmg; m.hit = 0.12; }
           }
           if (data.kind === 'miniplane' && level.miniPlanes) {
             const m = level.miniPlanes.find(mm => mm.id === data.id);
@@ -377,7 +377,7 @@ function mpJoinRoom(code) {
     const conn = MP.peer.connect(MP_PREFIX + code.toUpperCase());
     MP.hostConn = conn;
     conn.on('open', () => { conn.send({ type: 'join', name: MP.myName }); });
-    conn.on('data', data => {
+    const handleHostData = data => {
       if (data.type === 'players') { MP.code = code.toUpperCase(); MP.players = data.players; mpUpdateLobbyUI(); }
       if (data.type === 'full') { mpShowJoinError('Esa sala ya tiene 5 jugadores.'); mpLeaveRoom(); }
       if (data.type === 'begin-selection') { MP.takenColors = {}; buildCharacterGrid(); showScreen('screen-character'); }
@@ -388,7 +388,7 @@ function mpJoinRoom(code) {
       if (data.type === 'advance-stage') { advanceStage(); }
       if (data.type === 'pos') {
         if (data.id !== mpMyId()) {
-          MP.remoteStates[data.id] = data;
+          mpStoreRemote(data);
           // Etapa 2: otro jugador está escoltando a un familiar; se
           // actualiza su posición en nuestra copia local.
           if (data.ownedNpc) {
@@ -403,7 +403,7 @@ function mpJoinRoom(code) {
       if (data.type === 'zombies') {
         const level = GAME.level;
         if (level) {
-          level.zombies = data.list;
+          level.zombies = mpMergeSmooth(level.zombies, data.list);
           GAME.run.kills = data.kills; GAME.run.totalKills = data.totalKills;
           level.killsThisStage = data.killsThisStage;
           // Se ven volar las balas enemigas (antes solo las veía el Admin);
@@ -414,10 +414,10 @@ function mpJoinRoom(code) {
       if (data.type === 'enemies') {
         const level = GAME.level;
         if (level) {
-          level.heli = data.heli;
-          level.miniPlanes = data.miniPlanes;
-          level.boss = data.boss;
-          level.miniRobots = data.miniRobots;
+          level.heli = mpMergeSmoothOne(level.heli, data.heli);
+          level.miniPlanes = mpMergeSmooth(level.miniPlanes, data.miniPlanes);
+          level.boss = mpMergeSmoothOne(level.boss, data.boss);
+          level.miniRobots = mpMergeSmooth(level.miniRobots, data.miniRobots);
           level.airBossDone = data.airBossDone;
           // Etapa 3: la poción del jefe helicóptero es compartida — solo el
           // Admin la crea/valida, acá solo se refleja su estado.
@@ -451,6 +451,10 @@ function mpJoinRoom(code) {
         if (data.targetId && data.targetId !== mpMyId()) { /* no era para mí, se ignora */ }
         else { const level = GAME.level; if (level) damagePlayerOrVehicle(level, data.dmg); }
       }
+    };
+    conn.on('data', data => {
+      if (data.type === 'batch') { for (const m of data.msgs) handleHostData(m); }
+      else handleHostData(data);
     });
     conn.on('error', () => { mpShowJoinError('No se pudo conectar. Revisá el código.'); mpLeaveRoom(); });
   });
@@ -630,10 +634,10 @@ function mpBuildPosPayload(level) {
     type: 'pos',
     id: mpMyId(),
     name: MP.myName,
-    x: level.vehicle ? level.vehicle.x : level.player.x,
-    y: level.vehicle ? level.vehicle.y : level.player.y,
-    angle: level.vehicle ? level.vehicle.angle : level.player.angle,
-    aimAngle: level.player.angle,
+    x: Math.round(level.vehicle ? level.vehicle.x : level.player.x),
+    y: Math.round(level.vehicle ? level.vehicle.y : level.player.y),
+    angle: +(level.vehicle ? level.vehicle.angle : level.player.angle).toFixed(2),
+    aimAngle: +level.player.angle.toFixed(2),
     vehicleDef: level.vehicle ? level.vehicle.def : null,
     vehicleColor: level.vehicle ? level.vehicle.mpColor : null,
     charColor: GAME.selection.character ? GAME.selection.character.color : '#e9e6d6',
@@ -660,28 +664,25 @@ function mpSendMyStateNow(level) {
 
 function mpBroadcastMyState(level, dt) {
   MP._sendAcc = (MP._sendAcc || 0) + dt;
-  if (MP._sendAcc < 0.07) return; // ~14 veces por segundo, suficiente y liviano
+  if (MP._sendAcc < 0.05) return; // ~20 veces por segundo (el cliente interpola, se ve fluido)
   MP._sendAcc = 0;
   const payload = mpBuildPosPayload(level);
   if (MP.isHost) {
-    MP.conns.forEach(c => { try { c.send(payload); } catch (e) { /* noop */ } });
     const zPayload = {
       type: 'zombies',
-      list: level.zombies.map(z => ({ id: z.id, x: z.x, y: z.y, angle: z.angle, type: z.type, hp: z.hp, maxHp: z.maxHp, hit: z.hit })),
+      list: level.zombies.map(z => ({ id: z.id, x: Math.round(z.x), y: Math.round(z.y), angle: +z.angle.toFixed(2), type: z.type, hp: z.hp, maxHp: z.maxHp, hit: z.hit })),
       kills: GAME.run.kills, totalKills: GAME.run.totalKills, killsThisStage: level.killsThisStage,
       // Balas de zombies/helicópteros/jefe: se mandan para que TODOS vean
       // que le están disparando a quien sea (no solo al Admin). No se manda
       // el targetRef: solo el Admin aplica el daño real (ver updateBullets),
       // el resto únicamente las dibuja volar.
-      enemyBullets: level.enemyBullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, life: b.life })),
+      enemyBullets: level.enemyBullets.map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy), life: +b.life.toFixed(2) })),
     };
-    MP.conns.forEach(c => { try { c.send(zPayload); } catch (e) { /* noop */ } });
-    const ePayload = mpBuildEnemiesPayload(level);
-    MP.conns.forEach(c => { try { c.send(ePayload); } catch (e) { /* noop */ } });
+    const msgs = [payload, zPayload, mpBuildEnemiesPayload(level)];
     // Etapas 1 y 2: misión de rescate compartida (supervivientes/familia).
-    if (stageHasSharedObjective(level.stage)) {
-      MP.conns.forEach(c => { try { c.send(mpBuildObjectivePayload(level)); } catch (e) { /* noop */ } });
-    }
+    if (stageHasSharedObjective(level.stage)) msgs.push(mpBuildObjectivePayload(level));
+    const batch = { type: 'batch', msgs };
+    MP.conns.forEach(c => { try { c.send(batch); } catch (e) { /* noop */ } });
   } else if (MP.hostConn) {
     try { MP.hostConn.send(payload); } catch (e) { /* noop */ }
   }
@@ -698,7 +699,7 @@ function mpBuildEnemiesPayload(level) {
     heli: level.heli ? { x: level.heli.x, y: level.heli.y, hp: level.heli.hp, maxHp: level.heli.maxHp, isBoss: level.heli.isBoss, active: level.heli.active, shielded: level.heli.shielded, hit: level.heli.hit } : null,
     miniPlanes: level.miniPlanes ? level.miniPlanes.map(m => ({ id: m.id, x: m.x, y: m.y, angle: m.angle, hp: m.hp, maxHp: m.maxHp, hit: m.hit, alive: true })) : null,
     boss: level.boss ? { x: level.boss.x, y: level.boss.y, angle: level.boss.angle, hp: level.boss.hp, maxHp: level.boss.maxHp, active: level.boss.active, defeated: level.boss.defeated, coreDefeated: level.boss.coreDefeated, invulnerable: level.boss.invulnerable, phase: level.boss.phase, hit: level.boss.hit } : null,
-    miniRobots: level.miniRobots ? level.miniRobots.map(m => ({ id: m.id, x: m.x, y: m.y, angle: m.angle, hp: m.hp, maxHp: m.maxHp, hit: m.hit })) : null,
+    miniRobots: level.miniRobots ? level.miniRobots.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), angle: +m.angle.toFixed(2), hp: m.hp, maxHp: m.maxHp, hit: m.hit, alive: true })) : null,
     airBossDone: level.airBossDone || false,
     // Etapa 3: la poción que suelta el jefe helicóptero, quién puede
     // agarrarla (más vida) y quién ya la tiene en mano.
@@ -776,17 +777,62 @@ function mpClaimPotion(level, id) {
   if (mpIsActive() && MP.isHost) MP.conns.forEach(c => { try { c.send(mpBuildEnemiesPayload(level)); } catch (e) { /* noop */ } });
 }
 
+/* ---- Suavizado (interpolacion) de lo que llega por red ---- */
+function mpStoreRemote(data) {
+  const prev = MP.remoteStates[data.id];
+  data.rx = prev && prev.rx !== undefined ? prev.rx : data.x;
+  data.ry = prev && prev.ry !== undefined ? prev.ry : data.y;
+  data.ra = prev && prev.ra !== undefined ? prev.ra : data.angle;
+  data.rAim = prev && prev.rAim !== undefined ? prev.rAim : (data.aimAngle !== undefined ? data.aimAngle : data.angle);
+  MP.remoteStates[data.id] = data;
+}
+
+// Conserva la posicion visible anterior y guarda la nueva como objetivo (tx,ty);
+// cada frame se acerca a ella (mpSmoothStep) en vez de "teletransportarse".
+function mpMergeSmoothOne(old, inc) {
+  if (!inc) return inc;
+  inc.tx = inc.x; inc.ty = inc.y; inc.ta = inc.angle;
+  if (old && old.x !== undefined && dist(old.x, old.y, inc.x, inc.y) < 260) {
+    inc.x = old.x; inc.y = old.y;
+    if (inc.angle !== undefined && old.angle !== undefined) inc.angle = old.angle;
+  }
+  return inc;
+}
+function mpMergeSmooth(oldList, incList) {
+  if (!incList) return incList;
+  const byId = new Map();
+  (oldList || []).forEach(o => byId.set(o.id, o));
+  return incList.map(n => mpMergeSmoothOne(byId.get(n.id), n));
+}
+function mpSmoothStep(level, dt) {
+  const k = 1 - Math.exp(-dt * 22);
+  const step = e => {
+    if (!e || e.tx === undefined) return;
+    e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k;
+    if (e.ta !== undefined && e.angle !== undefined) e.angle = lerpAngle(e.angle, e.ta, k);
+  };
+  level.zombies.forEach(step);
+  step(level.heli); step(level.boss);
+  if (level.miniPlanes) level.miniPlanes.forEach(step);
+  if (level.miniRobots) level.miniRobots.forEach(step);
+}
+
 function mpDrawRemotePlayers(ctx) {
   const myId = mpMyId();
+  const k = 1 - Math.exp(-(GAME.frameDt || 0.016) * 22);
   Object.values(MP.remoteStates).forEach(s => {
     if (s.id === myId) return;
+    if (dist(s.rx, s.ry, s.x, s.y) > 300) { s.rx = s.x; s.ry = s.y; }
+    else { s.rx += (s.x - s.rx) * k; s.ry += (s.y - s.ry) * k; }
+    s.ra = lerpAngle(s.ra, s.angle, k);
+    s.rAim = lerpAngle(s.rAim, s.aimAngle !== undefined ? s.aimAngle : s.angle, k);
     ctx.save();
     if (s.dead) ctx.globalAlpha = 0.35; // cuerpo apagado para el jugador eliminado
     if (s.vehicleDef) {
-      const remoteRider = { color: s.charColor, accent: s.charAccent, aimAngle: s.aimAngle !== undefined ? s.aimAngle : s.angle };
-      drawVehicle(ctx, s.x, s.y, s.angle, s.vehicleDef, 1, s.vehicleColor, remoteRider);
+      const remoteRider = { color: s.charColor, accent: s.charAccent, aimAngle: s.rAim };
+      drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider);
     }
-    else drawHuman(ctx, s.x, s.y, s.angle, s.charColor, s.charAccent, 1);
+    else drawHuman(ctx, s.rx, s.ry, s.ra, s.charColor, s.charAccent, 1);
     ctx.restore();
     ctx.save();
     ctx.fillStyle = s.dead ? '#d1272d' : '#e9e6d6';
@@ -795,7 +841,7 @@ function mpDrawRemotePlayers(ctx) {
     ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
     const holdsPotion = GAME.level && GAME.level.potionHolder === s.id;
     const label = s.dead ? `☠ ${s.name || ''} — ELIMINADO` : `${s.name || ''}${holdsPotion ? ' 🧪' : ''}`;
-    ctx.fillText(label, s.x, s.y - 46);
+    ctx.fillText(label, s.rx, s.ry - 46);
     ctx.restore();
   });
 }
@@ -1521,6 +1567,7 @@ function startStageGameplay() {
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    GAME.frameDt = dt;
     // En multijugador, pausar es solo para vos (ver el menú): el mundo
     // compartido sigue corriendo y te pueden seguir atacando. En solitario,
     // pausar sí detiene todo como siempre.
@@ -1841,6 +1888,7 @@ function update(dt) {
   const level = GAME.level; const stage = level.stage;
   level.time += dt;
   level.shakeT = Math.max(0, level.shakeT - dt);
+  if (mpIsActive() && !MP.isHost) mpSmoothStep(level, dt);
   if (level.vehicle) level.player.speed = level.vehicle.def.speed;
 
   // En multijugador, si estás en el menú de pausa no podés moverte ni
@@ -1878,7 +1926,8 @@ function update(dt) {
   // segura). Eso lo sacaba de la pantalla de eliminado hacia la de espera
   // sin poder volver, obligándolo a reiniciar toda la etapa para salir.
   if (!level.dead) checkStageCompletion(level);
-  updateHUD(level);
+  level._hudT = (level._hudT === undefined ? 1 : level._hudT) + dt;
+  if (level._hudT >= 0.1) { level._hudT = 0; updateHUD(level); }
   if (mpIsActive()) mpBroadcastMyState(level, dt);
 }
 
@@ -2798,8 +2847,8 @@ function render() {
   if (level.boss && level.boss.active && !level.boss.defeated) drawBoss(ctx, level.boss.x, level.boss.y, level.boss.hp / level.boss.maxHp, level.boss.hit || 0, 1, level.boss.invulnerable);
   if (level.miniRobots && level.boss && level.boss.active && !level.boss.defeated) level.miniRobots.forEach(m => drawBoss(ctx, m.x, m.y, m.hp / m.maxHp, m.hit, 0.42));
 
-  level.bullets.forEach(b => { ctx.fillStyle = b.color; ctx.shadowColor = b.color; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; });
-  level.enemyBullets.forEach(b => { ctx.fillStyle = '#d1272d'; ctx.shadowColor = '#d1272d'; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0; });
+  level.bullets.forEach(b => { ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
+  level.enemyBullets.forEach(b => { ctx.fillStyle = '#d1272d'; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); });
   level.particles.forEach(p => {
     ctx.globalAlpha = clamp(p.life / 0.4, 0, 1);
     if (p.ring) { ctx.strokeStyle = p.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, 90 * (1 - p.life / 0.25), 0, Math.PI * 2); ctx.stroke(); }
