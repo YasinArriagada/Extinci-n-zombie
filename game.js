@@ -2393,15 +2393,6 @@ function updateHelis(level, dt) {
       level.heli = null;
     }
   }
-  if (document.getElementById('hud-boss')) {
-    document.getElementById('hud-boss').classList.toggle('show', !!(level.heli && level.heli.isBoss));
-    if (level.heli && level.heli.isBoss) {
-      document.getElementById('hud-boss-label').textContent = level.heli.shielded
-        ? 'HELICÓPTERO PRINCIPAL — ESCUDO ACTIVO (elimina a los mini aviones)'
-        : (level.heli.hp <= level.heli.maxHp * 0.5 ? 'HELICÓPTERO PRINCIPAL — BLINDAJE REFORZADO' : 'HELICÓPTERO PRINCIPAL');
-      document.getElementById('hud-boss-hp').style.width = clamp(level.heli.hp / level.heli.maxHp * 100, 0, 100) + '%';
-    }
-  }
 }
 
 // Los 10 aviones mini orbitan alrededor del avión jefe, lo siguen si se mueve,
@@ -2442,7 +2433,6 @@ function updateBoss(level, dt) {
   const targets = mpGetAllTargets(level);
   const nearest = mpNearestTarget(b, targets);
   if (!b.active && dist(nearest.x, nearest.y, b.x, b.y) < 480) { b.active = true; }
-  document.getElementById('hud-boss').classList.toggle('show', b.active);
   if (!b.active) return;
   b.hit = Math.max(0, (b.hit || 0) - dt);
 
@@ -2453,10 +2443,6 @@ function updateBoss(level, dt) {
   // fase de dificultad: solo escala una vez que las escoltas están muertas
   b.phase = !escorted && hpPct <= 0.3 ? 3 : !escorted && hpPct <= 0.5 ? 2 : 1;
 
-  document.getElementById('hud-boss-label').textContent = escorted
-    ? 'JEFE: PROTEGIDO — ELIMINA A SUS ESCOLTAS'
-    : b.phase === 3 ? 'JEFE: ZOMBIE ROBÓTICO (FURIA)' : b.phase === 2 ? 'JEFE: ZOMBIE ROBÓTICO (ALERTA)' : 'JEFE: ZOMBIE ROBÓTICO';
-  document.getElementById('hud-boss-hp').style.width = clamp(hpPct * 100, 0, 100) + '%';
 
   b.moveT += dt;
   // esquiva errática que se intensifica al perder vida, una vez sin escoltas
@@ -2996,7 +2982,38 @@ function updateObjectiveUI() {
   document.getElementById('hud-objective').textContent = 'Objetivo: ' + level.stage.objectiveText;
 }
 
+// Barra de vida del jefe (etapa 3: helicóptero, etapa 5: jefe final).
+// Se calcula acá, en updateHUD, porque esto corre en todos los jugadores;
+// antes estaba dentro de updateHelis/updateBoss, que solo corre el Admin,
+// y por eso los demás jugadores no veían la barra.
+function updateBossHUD(level) {
+  const hud = document.getElementById('hud-boss');
+  if (!hud) return;
+  const label = document.getElementById('hud-boss-label');
+  const bar = document.getElementById('hud-boss-hp');
+  const h = level.heli, b = level.boss;
+  if (level.stage.objectiveType === 'airBoss' && h && h.isBoss) {
+    hud.classList.add('show');
+    label.textContent = h.shielded
+      ? 'HELICÓPTERO PRINCIPAL — ESCUDO ACTIVO (elimina a los mini aviones)'
+      : (h.hp <= h.maxHp * 0.5 ? 'HELICÓPTERO PRINCIPAL — BLINDAJE REFORZADO' : 'HELICÓPTERO PRINCIPAL');
+    bar.style.width = clamp(h.hp / h.maxHp * 100, 0, 100) + '%';
+  } else if (level.stage.objectiveType === 'boss' && b && b.active && !b.defeated) {
+    hud.classList.add('show');
+    const escorted = !!(level.miniRobots && level.miniRobots.length > 0);
+    const hpPct = b.hp / b.maxHp;
+    const phase = !escorted && hpPct <= 0.3 ? 3 : !escorted && hpPct <= 0.5 ? 2 : 1;
+    label.textContent = escorted
+      ? 'JEFE: PROTEGIDO — ELIMINA A SUS ESCOLTAS'
+      : phase === 3 ? 'JEFE: ZOMBIE ROBÓTICO (FURIA)' : phase === 2 ? 'JEFE: ZOMBIE ROBÓTICO (ALERTA)' : 'JEFE: ZOMBIE ROBÓTICO';
+    bar.style.width = clamp(hpPct * 100, 0, 100) + '%';
+  } else {
+    hud.classList.remove('show');
+  }
+}
+
 function updateHUD(level) {
+  updateBossHUD(level);
   document.getElementById('hud-player-hp').style.width = clamp(level.player.hp / level.player.maxHp * 100, 0, 100) + '%';
   const vBlock = document.getElementById('hud-vehicle-block');
   if (level.vehicle) {
