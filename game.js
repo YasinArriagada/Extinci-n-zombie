@@ -1915,8 +1915,9 @@ function updatePlayerMovement(level, dt) {
   } else {
     const canvas = document.getElementById('game-canvas');
     const screenCX = canvas.width / 2, screenCY = canvas.height / 2;
-    const worldMouseX = level.camera.x + (GAME.input.mouse.x - screenCX);
-    const worldMouseY = level.camera.y + (GAME.input.mouse.y - screenCY);
+    const zoom = getViewZoom(canvas.width, canvas.height);
+    const worldMouseX = level.camera.x + (GAME.input.mouse.x - screenCX) / zoom;
+    const worldMouseY = level.camera.y + (GAME.input.mouse.y - screenCY) / zoom;
     p.angle = angleTo(p.x, p.y, worldMouseX, worldMouseY);
   }
 
@@ -2177,11 +2178,11 @@ function updateZombies(level, dt) {
     if (z.type === 'gunner' && d < 340 && d > 90) {
       if (z.cd <= 0) {
         z.cd = 1.6;
-        if (target.isSelf) {
-          level.enemyBullets.push({ x: z.x, y: z.y, vx: Math.cos(z.angle) * 260, vy: Math.sin(z.angle) * 260, dmg: 8, life: 2, targetRef: mpTargetRef(target) });
-        } else {
-          mpDamageTarget(level, target, 8);
-        }
+        // Siempre sale una bala real (visible para todos, ver enemyBullets en la
+        // sincronización), sea el blanco el Admin o un invitado. Antes, si el blanco
+        // era un invitado, se le restaba vida al instante desde hasta 340px sin bala:
+        // en el celular parecía daño "de la nada".
+        level.enemyBullets.push({ x: z.x, y: z.y, vx: Math.cos(z.angle) * 260, vy: Math.sin(z.angle) * 260, dmg: 8, life: 2, targetRef: mpTargetRef(target) });
       }
     } else if (d > 26) {
       z.x += Math.cos(z.angle) * z.speed * dt; z.y += Math.sin(z.angle) * z.speed * dt;
@@ -2764,6 +2765,16 @@ function buildControllerScene() {
 
 /* --------------------------------- RENDER ----------------------------------- */
 
+// En una pantalla chica (celular) el mundo se veía 1:1 en píxeles, o sea que se
+// alcanzaba a ver MUCHO menos terreno que en PC (~195px hacia arriba/abajo en un
+// celular apaisado), mientras los enemigos atacan desde 340-520px: todo lo que
+// disparaba desde fuera de pantalla parecía quitar vida "de la nada". Acá se
+// aleja la cámara en pantallas chicas para que el área visible se parezca a la de
+// una PC. En PC (>= 1000x620) el zoom es 1, o sea que no cambia nada.
+function getViewZoom(w, h) {
+  return clamp(Math.min(w / 1000, h / 620), 0.55, 1);
+}
+
 function render() {
   const level = GAME.level;
   const canvas = document.getElementById('game-canvas');
@@ -2778,10 +2789,13 @@ function render() {
   g.addColorStop(0, level.stage.palette.ground); g.addColorStop(1, level.stage.palette.accent);
   ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
 
-  const camX = level.camera.x - w / 2 + shakeX, camY = level.camera.y - h / 2 + shakeY;
+  const zoom = getViewZoom(w, h);
+  const vw = w / zoom, vh = h / zoom; // tamaño del área visible, en unidades del mundo
+  const camX = level.camera.x - vw / 2 + shakeX, camY = level.camera.y - vh / 2 + shakeY;
+  ctx.scale(zoom, zoom);
   ctx.translate(-camX, -camY);
 
-  drawGroundGrid(ctx, camX, camY, w, h);
+  drawGroundGrid(ctx, camX, camY, vw, vh);
   drawDecor(ctx, level);
   drawSafeZone(ctx, level);
 
@@ -2837,16 +2851,16 @@ function render() {
 
   if (level.stage.objectiveType === 'rescue') {
     const targets = level.survivors.filter(s => !s.rescued);
-    drawOffscreenIndicators(ctx, camX, camY, w, h, targets, '#e9e6d6', 'SUPERVIVIENTE');
+    drawOffscreenIndicators(ctx, camX, camY, w, h, targets, '#e9e6d6', 'SUPERVIVIENTE', zoom);
   }
   if (level.stage.objectiveType === 'findNPC') {
     level.npcs.forEach(n => {
       if (n.delivered) return;
-      drawOffscreenIndicators(ctx, camX, camY, w, h, [n], '#e9e6d6', n.following ? n.name : `${n.name} PERDIDO/A`);
+      drawOffscreenIndicators(ctx, camX, camY, w, h, [n], '#e9e6d6', n.following ? n.name : `${n.name} PERDIDO/A`, zoom);
     });
   }
   if (level.stage.objectiveType === 'airBoss' && level.heli && level.heli.active) {
-    drawOffscreenIndicators(ctx, camX, camY, w, h, [level.heli], level.heli.isBoss ? '#ff5050' : '#e0b13f', level.heli.isBoss ? 'HELI JEFE' : 'HELICÓPTERO');
+    drawOffscreenIndicators(ctx, camX, camY, w, h, [level.heli], level.heli.isBoss ? '#ff5050' : '#e0b13f', level.heli.isBoss ? 'HELI JEFE' : 'HELICÓPTERO', zoom);
   }
 
   drawMinimap(level);
@@ -2855,10 +2869,10 @@ function render() {
 
 /* Flechas en el borde de pantalla que apuntan hacia objetivos fuera de vista
    (supervivientes en la etapa 1, helicóptero en la etapa 3, etc). */
-function drawOffscreenIndicators(ctx, camX, camY, w, h, targets, color, label) {
+function drawOffscreenIndicators(ctx, camX, camY, w, h, targets, color, label, zoom = 1) {
   const cx = w / 2, cy = h / 2, margin = 34;
   targets.forEach(t => {
-    const sx = t.x - camX, sy = t.y - camY;
+    const sx = (t.x - camX) * zoom, sy = (t.y - camY) * zoom;
     const inView = sx > margin && sx < w - margin && sy > margin && sy < h - margin;
     if (inView) return;
     const dx = sx - cx, dy = sy - cy;
