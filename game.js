@@ -414,6 +414,10 @@ function mpJoinRoom(code) {
       if (data.type === 'enemies') {
         const level = GAME.level;
         if (level) {
+          // Etapa 5: en cuanto el Admin derrota al jefe final, se dispara la
+          // MISMA cutscene local para este jugador (cada uno la ve a su
+          // propio ritmo, la decisión final llega aparte, ver 'ending').
+          const bossJustDefeated = data.boss && data.boss.defeated && level.subPhase === 'play' && !(level.boss && level.boss.defeated);
           level.heli = mpMergeSmoothOne(level.heli, data.heli);
           level.miniPlanes = mpMergeSmooth(level.miniPlanes, data.miniPlanes);
           level.boss = mpMergeSmoothOne(level.boss, data.boss);
@@ -429,6 +433,7 @@ function mpJoinRoom(code) {
           level.potionEligible = data.potionEligible || null;
           level.potionHolder = data.potionHolder || null;
           if (level.potionHolder === mpMyId()) level.hasPotion = true;
+          if (bossJustDefeated) { level.subPhase = 'bossDefeatedCutscene'; level.cutsceneT = 0; }
         }
       }
       if (data.type === 'objective') {
@@ -451,6 +456,10 @@ function mpJoinRoom(code) {
         if (data.targetId && data.targetId !== mpMyId()) { /* no era para mí, se ignora */ }
         else { const level = GAME.level; if (level) damagePlayerOrVehicle(level, data.dmg); }
       }
+      // Etapa 5: el Admin ya decidió el final — pasamos a esa misma
+      // pantalla nosotros también, estemos donde estemos (jugando, leyendo
+      // el papel, o ya esperando en la pantalla de decisión).
+      if (data.type === 'ending') { resolveEnding(data.yes); }
     };
     conn.on('data', data => {
       if (data.type === 'batch') { for (const m of data.msgs) handleHostData(m); }
@@ -914,9 +923,9 @@ function handleAction(action) {
     case 'restart-stage': togglePause(false); startStageGameplay(); break;
     case 'quit-menu': fullReset(); showScreen('screen-menu'); break;
     case 'retry-run': fullReset(); showScreen('screen-menu'); break;
-    case 'controller-reveal-continue': showScreen('screen-potion'); break;
-    case 'potion-yes': resolveEnding(true); break;
-    case 'potion-no': resolveEnding(false); break;
+    case 'controller-reveal-continue': showPotionChoiceScreen(); break;
+    case 'potion-yes': mpChooseEnding(true); break;
+    case 'potion-no': mpChooseEnding(false); break;
     case 'force-fullscreen': requestGameFullscreen(true); break;
   }
 }
@@ -2716,6 +2725,28 @@ function advanceStage() {
   if (isLast) { return; } // el final se gestiona vía la poción
   GAME.stageIndex++;
   openVehicleSelectForCurrentStage();
+}
+
+// Etapa 5 en multijugador: al derrotar al jefe final, TODOS los jugadores
+// llegan a esta pantalla (cada uno a su propio ritmo, tras leer el papel),
+// pero solo el Admin puede elegir — los demás solo ven un aviso de espera
+// y su pantalla cambia sola en cuanto el Admin decide (ver mpChooseEnding
+// y el manejador de 'ending').
+function showPotionChoiceScreen() {
+  const isGuest = mpIsActive() && !MP.isHost;
+  const btns = document.getElementById('potion-buttons');
+  const waiting = document.getElementById('potion-waiting');
+  const sub = document.getElementById('potion-sub');
+  if (btns) btns.style.display = isGuest ? 'none' : '';
+  if (waiting) waiting.style.display = isGuest ? '' : 'none';
+  if (sub) sub.textContent = isGuest ? 'El zombie con lentes espera en silencio la respuesta del Admin.' : 'El zombie con lentes espera tu respuesta en silencio.';
+  showScreen('screen-potion');
+}
+
+function mpChooseEnding(yes) {
+  if (mpIsActive() && !MP.isHost) return; // un invitado nunca decide, aunque le llegue a tocar el botón
+  if (mpIsActive() && MP.isHost) MP.conns.forEach(c => { try { c.send({ type: 'ending', yes }); } catch (e) { /* noop */ } });
+  resolveEnding(yes);
 }
 
 function resolveEnding(yes) {

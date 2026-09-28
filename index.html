@@ -370,11 +370,12 @@
   <section id="screen-potion" class="screen overlay-screen">
     <div class="panel-frame potion-panel">
       <h2 class="panel-title glow-text">¿QUIERES ELIMINAR A TODOS LOS ZOMBIES Y SALVAR AL MUNDO?</h2>
-      <p class="panel-sub">El zombie con lentes espera tu respuesta en silencio.</p>
-      <div class="potion-buttons">
+      <p class="panel-sub" id="potion-sub">El zombie con lentes espera tu respuesta en silencio.</p>
+      <div class="potion-buttons" id="potion-buttons">
         <button class="btn btn-primary" data-action="potion-yes">SÍ</button>
         <button class="btn btn-danger" data-action="potion-no">NO</button>
       </div>
+      <p class="potion-waiting" id="potion-waiting">Solo el Admin de la partida puede decidir. Esperando su respuesta...</p>
     </div>
   </section>
 

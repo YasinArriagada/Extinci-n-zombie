@@ -354,6 +354,7 @@ html,body{
 /* ---------- Potion ---------- */
 .potion-panel{ max-width:480px; }
 .potion-buttons{ display:flex; gap:20px; justify-content:center; margin-top:10px; }
+.potion-waiting{ display:none; margin-top:10px; font-size:0.85rem; color: var(--toxic); letter-spacing:0.5px; opacity:0.9; }
 
 /* ---------- Endings ---------- */
 .end-content{ text-align:center; max-width:640px; padding:20px; }
