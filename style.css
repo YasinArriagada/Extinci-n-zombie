@@ -545,7 +545,12 @@ html,body{
 /* ---------- Overlay de jugador eliminado (multijugador) ---------- */
 .hud-dead-overlay{
   position:absolute; inset:0; display:none; align-items:flex-start; justify-content:center;
-  pointer-events:none; z-index:55; padding-top: 14%;
+  /* Por encima de .touch-controls (z-index:60): en celular la zona invisible
+     de puntería/disparo (mitad derecha de toda la pantalla) tapa el botón
+     "VOLVER A JUGAR" para el toque, aunque se vea encima. Este elemento debe
+     ser hijo directo de #screen-game (NO de .hud, que tiene z-index:50 y crea
+     su propia capa de apilado), si no este z-index no sirve de nada. */
+  pointer-events:none; z-index:65; padding-top: 14%;
 }
 .hud-dead-overlay.show{ display:flex; }
 .dead-overlay-box{
@@ -560,5 +565,6 @@ html,body{
 .dead-overlay-sub{ font-size:0.78rem; color: var(--bone); opacity:0.85; margin-top:6px; letter-spacing:0.5px; }
 .dead-overlay-btn{
   margin-top:14px; pointer-events:auto; font-size:0.85rem; padding:10px 26px;
+  min-height:46px; touch-action:manipulation; -webkit-tap-highlight-color:transparent;
 }
 @keyframes dead-fade-in{ from{ opacity:0; transform:translateY(-8px);} to{ opacity:1; transform:translateY(0);} }
