@@ -673,6 +673,16 @@ function mpUpdateStageWaitUI(doneIds) {
 // Arma el paquete de posición/estado propio, incluyendo si este jugador
 // ya fue eliminado (dead) para que el resto (y el Admin, si no lo es)
 // sepan que ya no debe recibir ataques ni contar como blanco.
+// Disparos propios pendientes de enviar (jugador, compañero y aliados), en todas
+// las etapas. Los demás los dibujan como balas
+// visuales: el daño real lo sigue aplicando quien dispara, no cambia.
+function mpQueueShot(level, b) {
+  if (!mpIsActive()) return;
+  if (!MP._shots) MP._shots = [];
+  if (MP._shots.length > 60) return; // tope por si hay muchísimos disparos juntos
+  MP._shots.push({ x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy), c: b.color, l: +b.life.toFixed(2), r: b.r, t: performance.now() });
+}
+
 function mpBuildPosPayload(level) {
   const ownedNpc = level.npcs ? level.npcs.find(n => n.rescuedBy === mpMyId() && !n.delivered) : null;
   return {
@@ -689,6 +699,11 @@ function mpBuildPosPayload(level) {
     charAccent: GAME.selection.character ? GAME.selection.character.accent : '#5f8f2e',
     dead: !!level.dead,
     hp: level.vehicle ? level.vehicle.hp : level.player.hp,
+    // Etapa 5 / batalla definitiva: mi compañero, mis aliados (Tralalero) y los
+    // disparos hechos desde el último envío, para que todos los vean.
+    companion: level.companion ? { x: Math.round(level.companion.x), y: Math.round(level.companion.y), color: level.companion.def.color, ability: level.companion.def.ability } : null,
+    allies: level.allies ? level.allies.map(a => ({ x: Math.round(a.x), y: Math.round(a.y) })) : null,
+    shots: MP._shots && MP._shots.length ? MP._shots.splice(0).map(s => ({ ...s, t: undefined, age: +((performance.now() - s.t) / 1000).toFixed(3) })) : null,
     // Etapa 2 en multijugador: si este jugador está escoltando a un
     // familiar, se manda su posición actual para que el resto (y el Admin,
     // si no lo es) lo vean moverse en tiempo real.
@@ -833,7 +848,19 @@ function mpStoreRemote(data) {
   data.ry = prev && prev.ry !== undefined ? prev.ry : data.y;
   data.ra = prev && prev.ra !== undefined ? prev.ra : data.angle;
   data.rAim = prev && prev.rAim !== undefined ? prev.rAim : (data.aimAngle !== undefined ? data.aimAngle : data.angle);
+  data.rComp = prev ? prev.rComp : null;
+  data.rAllies = prev ? prev.rAllies : null;
   MP.remoteStates[data.id] = data;
+  // disparos del otro jugador: se agregan como balas solo visuales (sin daño)
+  const level = GAME.level;
+  if (data.shots && level && level.remoteBullets) {
+    data.shots.forEach(s => {
+      const age = Math.min(0.25, s.age || 0); // compensa el retraso de red
+      level.remoteBullets.push({ x: s.x + s.vx * age, y: s.y + s.vy * age, vx: s.vx, vy: s.vy, color: s.c, life: s.l - age, r: s.r });
+    });
+    if (level.remoteBullets.length > 250) level.remoteBullets.splice(0, level.remoteBullets.length - 250);
+    data.shots = null;
+  }
 }
 
 // Conserva la posicion visible anterior y guarda la nueva como objetivo (tx,ty);
@@ -891,6 +918,23 @@ function mpDrawRemotePlayers(ctx) {
     const holdsPotion = GAME.level && GAME.level.potionHolder === s.id;
     const label = s.dead ? `☠ ${s.name || ''} — ELIMINADO` : `${s.name || ''}${holdsPotion ? ' 🧪' : ''}`;
     ctx.fillText(label, s.rx, s.ry - 46);
+    ctx.restore();
+    // compañero y aliados del otro jugador (con el mismo suavizado)
+    ctx.save();
+    if (s.dead) ctx.globalAlpha = 0.35;
+    if (s.companion) {
+      if (!s.rComp || dist(s.rComp.x, s.rComp.y, s.companion.x, s.companion.y) > 300) s.rComp = { x: s.companion.x, y: s.companion.y };
+      else { s.rComp.x += (s.companion.x - s.rComp.x) * k; s.rComp.y += (s.companion.y - s.rComp.y) * k; }
+      drawCompanion(ctx, s.rComp.x, s.rComp.y, { color: s.companion.color }, 1.4);
+    }
+    if (s.allies) {
+      if (!s.rAllies || s.rAllies.length !== s.allies.length) s.rAllies = s.allies.map(a => ({ x: a.x, y: a.y }));
+      s.allies.forEach((a, i) => {
+        const r = s.rAllies[i];
+        if (dist(r.x, r.y, a.x, a.y) > 300) { r.x = a.x; r.y = a.y; } else { r.x += (a.x - r.x) * k; r.y += (a.y - r.y) * k; }
+        drawCompanion(ctx, r.x, r.y, { color: ALLY_COLOR }, 1.3);
+      });
+    }
     ctx.restore();
   });
 }
@@ -1563,7 +1607,7 @@ function startStageGameplay() {
     stage,
     player, vehicle,
     weaponStates, activeWeapon: 0,
-    bullets: [], enemyBullets: [], zombies: [], survivors: [], pickups: [], particles: [],
+    bullets: [], remoteBullets: [], enemyBullets: [], zombies: [], survivors: [], pickups: [], particles: [],
     npcs: [], companion: null,
     safeZone,
     decor: generateDecor(stage),
@@ -2124,10 +2168,12 @@ function fireWeapon(level, w) {
   for (let i = 0; i < pellets; i++) {
     const spread = (Math.random() - 0.5) * w.spread * 2;
     const a = p.angle + spread;
-    level.bullets.push({
+    const shot = {
       x: muzzleX, y: muzzleY, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
       dmg: w.dmg, color: w.color, life: w.short ? 0.25 : 1.0, r: w.short ? 5 : 3,
-    });
+    };
+    level.bullets.push(shot);
+    mpQueueShot(level, shot);
   }
   level.shakeT = Math.min(level.shakeT + 0.03, 0.12);
 }
@@ -2138,6 +2184,19 @@ function updateBullets(level, dt) {
 
   level.enemyBullets.forEach(b => { b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; });
   level.enemyBullets = level.enemyBullets.filter(b => b.life > 0);
+
+  // balas de OTROS jugadores: solo visuales (el daño lo aplica quien dispara).
+  // Desaparecen al tocar un zombie para que el impacto se vea natural.
+  if (level.remoteBullets && level.remoteBullets.length) {
+    level.remoteBullets.forEach(b => {
+      b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+      for (let i = 0; i < level.zombies.length; i++) {
+        const z = level.zombies[i];
+        if (z.alive !== false && dist(b.x, b.y, z.x, z.y) < 15) { b.life = 0; break; }
+      }
+    });
+    level.remoteBullets = level.remoteBullets.filter(b => b.life > 0 && b.x > -50 && b.x < WORLD.w + 50 && b.y > -50 && b.y < WORLD.h + 50);
+  }
 
   // colisión balas jugador -> zombies
   const iAmAuthoritative = !mpIsActive() || MP.isHost;
@@ -2754,7 +2813,9 @@ function updateCompanion(level, dt) {
     c.cd = 1.1;
     for (let i = -1; i <= 1; i++) {
       const a = c.angle + i * 0.15;
-      level.bullets.push({ x: c.x, y: c.y, vx: Math.cos(a) * 700, vy: Math.sin(a) * 700, dmg: 14, color: c.def.color, life: 1, r: 3 });
+      const shot = { x: c.x, y: c.y, vx: Math.cos(a) * 700, vy: Math.sin(a) * 700, dmg: 14, color: c.def.color, life: 1, r: 3 };
+      level.bullets.push(shot);
+      mpQueueShot(level, shot);
     }
   }
   if (c.def.ability === 'heal' && c.cd <= 0) {
@@ -2785,10 +2846,12 @@ function updateAllies(level, dt) {
       a.angle = angleTo(a.x, a.y, nearest.x, nearest.y);
       if (a.cd <= 0 && bestD < 380) {
         a.cd = 0.5;
-        level.bullets.push({
+        const shot = {
           x: a.x, y: a.y, vx: Math.cos(a.angle) * 640, vy: Math.sin(a.angle) * 640,
           dmg: 16, color: ALLY_COLOR, life: 1, r: 3, allyBullet: true,
-        });
+        };
+        level.bullets.push(shot);
+        mpQueueShot(level, shot);
       }
     }
   });
@@ -3323,6 +3386,7 @@ function render() {
   if (level.ship2 && !level.ship2.defeated) drawShip(ctx, level.ship2.x, level.ship2.y, level.ship2.hp / level.ship2.maxHp, level.ship2.hit || 0, level.time, level.ship2.invulnerable, false, true);
 
   level.bullets.forEach(b => { ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
+  (level.remoteBullets || []).forEach(b => { ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
   level.enemyBullets.forEach(b => { ctx.fillStyle = '#d1272d'; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); });
   level.particles.forEach(p => {
     ctx.globalAlpha = clamp(p.life / 0.4, 0, 1);
