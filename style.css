@@ -568,3 +568,6 @@ html,body{
   min-height:46px; touch-action:manipulation; -webkit-tap-highlight-color:transparent;
 }
 @keyframes dead-fade-in{ from{ opacity:0; transform:translateY(-8px);} to{ opacity:1; transform:translateY(0);} }
+
+/* Frase del zombie con lentes al aceptar el desafío */
+.challenge-quote{ font-size:1.2rem; opacity:1; color:#ff8a8a; text-shadow:0 0 12px rgba(209,39,45,0.6); line-height:1.5; margin: 6px 0 4px; }

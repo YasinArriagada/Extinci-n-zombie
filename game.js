@@ -136,9 +136,12 @@ const STAGES = [
       escortPlanes: 12, // mini aviones del helicóptero jefe (en la etapa 3 son 10)
       escortRobots: 8,  // mini robots del jefe robot (en la etapa 5 son 5)
       shipHp: 9000,     // vida del tercer jefe: zombie con lentes en su nave (más que cualquier otro jefe)
+      // SEGUNDO zombie con lentes: aparece cuando el primero baja a la mitad de su vida.
+      // "El doble de difícil": el doble de vida y de cadencia de disparo, más daño y más velocidad.
+      ship2: { hp: 2, rate: 2, dmg: 1.5, speed: 1.25 },
     },
     palette: { ground: '#1c0f0f', accent: '#2a1414' },
-    objectiveText: 'Derrota a los dos jefes a la vez: el helicóptero principal y el zombie robótico. Después aparecerá el zombie con lentes en su nave espacial. Todos sus enemigos están de vuelta, más fuertes.',
+    objectiveText: 'Derrota a los dos jefes a la vez: el helicóptero principal y el zombie robótico. Después aparecerá el zombie con lentes en su nave espacial y, cuando llegue a la mitad de su vida, un segundo zombie con lentes el doble de difícil. Todos sus enemigos están de vuelta, más fuertes.',
   },
 ];
 
@@ -355,6 +358,7 @@ function mpCreateRoom() {
             if (m && m.alive !== false) { m.hp -= data.dmg; m.hit = 0.12; }
           }
           if (data.kind === 'ship' && level.ship && !level.ship.invulnerable && !level.ship.defeated) { level.ship.hp -= data.dmg; level.ship.hit = 0.12; }
+          if (data.kind === 'ship2' && level.ship2 && !level.ship2.invulnerable && !level.ship2.defeated) { level.ship2.hp -= data.dmg; level.ship2.hit = 0.12; }
           if (data.kind === 'miniplane' && level.miniPlanes) {
             const m = level.miniPlanes.find(mm => mm.id === data.id);
             if (m) { m.hp -= data.dmg; m.hit = 0.12; }
@@ -452,6 +456,7 @@ function mpJoinRoom(code) {
           level.airBossDone = data.airBossDone;
           if (data.finalPhase && data.finalPhase !== level.finalPhase) { level.finalPhase = data.finalPhase; level.shakeT = 0.25; }
           level.ship = mpMergeSmoothOne(level.ship, data.ship || null);
+          level.ship2 = mpMergeSmoothOne(level.ship2, data.ship2 || null);
           // Etapa 3: la poción del jefe helicóptero es compartida — solo el
           // Admin la crea/valida, acá solo se refleja su estado.
           if (data.potion) {
@@ -744,6 +749,7 @@ function mpBuildEnemiesPayload(level) {
     // Batalla definitiva: fase (1 = helicóptero + robot, 2 = nave) y el tercer jefe.
     finalPhase: level.finalPhase || 0,
     ship: level.ship ? { x: level.ship.x, y: level.ship.y, angle: level.ship.angle, hp: level.ship.hp, maxHp: level.ship.maxHp, phase: level.ship.phase, entering: level.ship.entering, invulnerable: level.ship.invulnerable, defeated: level.ship.defeated, hit: level.ship.hit } : null,
+    ship2: level.ship2 ? { x: level.ship2.x, y: level.ship2.y, angle: level.ship2.angle, hp: level.ship2.hp, maxHp: level.ship2.maxHp, phase: level.ship2.phase, entering: level.ship2.entering, invulnerable: level.ship2.invulnerable, defeated: level.ship2.defeated, hit: level.ship2.hit } : null,
     // Etapa 3: la poción que suelta el jefe helicóptero, quién puede
     // agarrarla (más vida) y quién ya la tiene en mano.
     potion: potionPk ? { x: potionPk.x, y: potionPk.y, taken: potionPk.taken } : null,
@@ -855,7 +861,7 @@ function mpSmoothStep(level, dt) {
     if (e.ta !== undefined && e.angle !== undefined) e.angle = lerpAngle(e.angle, e.ta, k);
   };
   level.zombies.forEach(step);
-  step(level.heli); step(level.boss); step(level.ship);
+  step(level.heli); step(level.boss); step(level.ship); step(level.ship2);
   if (level.miniPlanes) level.miniPlanes.forEach(step);
   if (level.miniRobots) level.miniRobots.forEach(step);
 }
@@ -960,7 +966,7 @@ function handleAction(action) {
     case 'controller-reveal-continue': showPotionChoiceScreen(); break;
     case 'potion-yes': mpChooseEnding(true); break;
     case 'potion-no': mpChooseEnding(false); break;
-    case 'final-victory-continue': resolveEnding(true); break; // solo local: cada jugador pasa al final bueno a su ritmo
+    case 'final-victory-continue': showGoodEnd(); break; // solo local: cada jugador pasa al final bueno a su ritmo
     case 'force-fullscreen': requestGameFullscreen(true); break;
   }
 }
@@ -2162,6 +2168,15 @@ function updateBullets(level, dt) {
         }
       }
     }
+    if (level.ship2 && !level.ship2.defeated && !b.allyBullet) {
+      if (dist(b.x, b.y, level.ship2.x, level.ship2.y) < 62) {
+        b.life = 0; // el impacto se bloquea igual, para dar feedback visual
+        if (!level.ship2.invulnerable) {
+          if (iAmAuthoritative) { level.ship2.hp -= b.dmg; level.ship2.hit = 0.12; }
+          else if (MP.hostConn) { try { MP.hostConn.send({ type: 'ehit', kind: 'ship2', dmg: b.dmg }); } catch (e) { /* noop */ } }
+        }
+      }
+    }
     if (level.miniRobots && !b.allyBullet) {
       level.miniRobots.forEach(m => {
         if (!m.alive) return;
@@ -2868,11 +2883,33 @@ function mpChooseEnding(yes) {
   resolveEnding(yes);
 }
 
+// Final bueno (tras ganar la batalla definitiva).
+function showGoodEnd() {
+  cancelAnimationFrame(GAME.rafId);
+  buildGoodEndScene();
+  showScreen('screen-good-end');
+}
+
+// Al responder "SÍ": el zombie con lentes lanza su desafío y, a los pocos
+// segundos, empieza la batalla definitiva. Cada jugador (Admin e invitados)
+// ejecuta esto por su cuenta al recibir la decisión, así que el temporizador
+// arranca a la vez en todos y la batalla comienza sincronizada.
+function showChallengeScreen() {
+  cancelAnimationFrame(GAME.rafId);
+  stopBossMusic();
+  buildChallengeScene();
+  showScreen('screen-challenge');
+  setTimeout(() => {
+    if (GAME.screen === 'screen-challenge') startFinalBattle();
+  }, 6000);
+}
+
 function resolveEnding(yes) {
   cancelAnimationFrame(GAME.rafId);
   if (yes) {
-    buildGoodEndScene();
-    showScreen('screen-good-end');
+    // Solo multijugador: desafío del zombie con lentes + batalla definitiva.
+    // En solitario el "SÍ" sigue yendo directo al final bueno.
+    if (mpIsActive()) showChallengeScreen(); else showGoodEnd();
   } else if (mpIsActive()) {
     // Multijugador: el "NO" del Admin manda a TODOS a la batalla definitiva
     // (llega igual a invitados y Admin, ver mpChooseEnding y el manejador de 'ending').
@@ -2906,7 +2943,10 @@ function updateFinalBattle(level, dt) {
   const D = level.diff;
   const robotDown = !!(level.boss && level.boss.defeated);
   if (level.airBossDone && robotDown && !level.ship) { spawnShip(level); return; }
-  if (level.ship && level.ship.defeated) { finishFinalBattle(level); return; }
+  // Cuando el primer zombie con lentes llega a la mitad de su vida, aparece el segundo.
+  if (level.ship && !level.ship2 && !level.ship.entering && level.ship.hp <= level.ship.maxHp * 0.5) spawnShip2(level);
+  // La batalla termina cuando caen los DOS zombies con lentes.
+  if (level.ship && level.ship.defeated && level.ship2 && level.ship2.defeated) { finishFinalBattle(level); return; }
   level.patrolTimer -= dt;
   if (level.patrolTimer <= 0) {
     level.patrolTimer = 7;
@@ -2928,15 +2968,37 @@ function spawnShip(level) {
   };
 }
 
+// SEGUNDO zombie con lentes: llega cuando el primero baja a la mitad de su vida.
+// Entra desde el cielo por el costado (invulnerable durante la entrada) y es el
+// doble de difícil (ver level.diff.ship2): doble de vida y de cadencia, más daño y velocidad.
+function spawnShip2(level) {
+  const D = level.diff, M = D.ship2;
+  const hp = Math.round(D.shipHp * M.hp);
+  level.shakeT = 0.5;
+  level.ship2 = {
+    x: WORLD.w * 0.2, y: -160, hp, maxHp: hp, phase: 1,
+    angle: Math.PI / 2, cd: 2, moveT: 0, hit: 0, entering: true, invulnerable: true, defeated: false,
+    dashT: 0, dashVX: 0, dashVY: 0, spin: 0, summonT: 8, lastPhase: 1,
+  };
+  for (let i = 0; i < 6; i++) spawnZombie(level); // refuerzos con su llegada
+}
+
 function updateShip(level, dt) {
-  const sh = level.ship; if (!sh || sh.defeated) return;
+  updateShipUnit(level, dt, level.ship, null);
+  updateShipUnit(level, dt, level.ship2, level.diff ? level.diff.ship2 : null);
+}
+
+// mods = null para el primer zombie; para el segundo, sus multiplicadores (level.diff.ship2).
+function updateShipUnit(level, dt, sh, mods) {
+  if (!sh || sh.defeated) return;
+  const rate = mods ? mods.rate : 1, dmgMul = mods ? mods.dmg : 1, spdMul = mods ? mods.speed : 1;
   sh.hit = Math.max(0, sh.hit - dt);
   if (sh.hp <= 0) { sh.defeated = true; spawnDeathParticles(level, sh.x, sh.y); return; }
   const targets = mpGetAllTargets(level);
   const nearest = mpNearestTarget(sh, targets);
   // entrada: desciende desde arriba del mapa (invulnerable)
   if (sh.entering) {
-    sh.y += 110 * dt;
+    sh.y += 110 * spdMul * dt;
     if (sh.y >= 340) { sh.y = 340; sh.entering = false; sh.invulnerable = false; }
     return;
   }
@@ -2958,7 +3020,7 @@ function updateShip(level, dt) {
     const dashChance = sh.phase === 3 ? 0.03 : sh.phase === 2 ? 0.018 : 0.01;
     if (Math.random() < dashChance) {
       const a = angleTo(sh.x, sh.y, nearest.x, nearest.y) + rand(-0.6, 0.6);
-      const sp = sh.phase === 3 ? 340 : 260;
+      const sp = (sh.phase === 3 ? 340 : 260) * spdMul;
       sh.dashVX = Math.cos(a) * sp; sh.dashVY = Math.sin(a) * sp; sh.dashT = 0.45;
     } else {
       sh.x = clamp(sh.x + Math.sin(sh.moveT * 0.9) * 70 * dt, 150, WORLD.w - 150);
@@ -2973,16 +3035,16 @@ function updateShip(level, dt) {
   // refuerzos periódicos de zombies (más seguido en las últimas fases)
   sh.summonT -= dt;
   if (sh.summonT <= 0) {
-    sh.summonT = sh.phase === 3 ? 7 : 11;
+    sh.summonT = (sh.phase === 3 ? 7 : 11) / rate;
     for (let i = 0; i < 4; i++) spawnZombie(level);
   }
 
   if (sh.cd > 0 || level.enemyBullets.length > 260) return; // tope de balas: cuida el rendimiento de la red
   const ph = sh.phase;
-  const spd = 250 + ph * 45;
-  sh.cd = ph === 3 ? 0.4 : ph === 2 ? 0.55 : 0.75;
+  const spd = (250 + ph * 45) * spdMul;
+  sh.cd = (ph === 3 ? 0.4 : ph === 2 ? 0.55 : 0.75) / rate;
   const ref = mpTargetRef(nearest);
-  const shoot = (a, sp, dmg, life) => level.enemyBullets.push({ x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, dmg, life: life || 2.8, targetRef: ref });
+  const shoot = (a, sp, dmg, life) => level.enemyBullets.push({ x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, dmg: dmg * dmgMul, life: life || 2.8, targetRef: ref });
   const pattern = randi(0, ph === 1 ? 2 : 4);
   if (pattern === 0) {                 // ráfaga apuntada
     for (let i = 0; i < 4 + ph * 2; i++) shoot(sh.angle + rand(-0.07, 0.07), spd + i * 12, 10);
@@ -3047,13 +3109,20 @@ function drawGlassesZombie(ctx, x, y, scale) {
 }
 
 // Nave espacial del tercer jefe. wreck = true la dibuja inclinada, rota y humeante.
-function drawShip(ctx, x, y, hpPct, hit, t, invulnerable, wreck) {
+function drawShip(ctx, x, y, hpPct, hit, t, invulnerable, wreck, elite) {
   ctx.save();
   ctx.translate(x, y);
   if (wreck) ctx.rotate(-0.28);
+  if (elite && !wreck) {
+    // aura roja del segundo zombie con lentes
+    const ap = 1 + Math.sin(Date.now() / 220) * 0.05;
+    const ag = ctx.createRadialGradient(0, 0, 30, 0, 0, 96 * ap);
+    ag.addColorStop(0, 'rgba(209,39,45,0.0)'); ag.addColorStop(1, 'rgba(209,39,45,0.35)');
+    ctx.fillStyle = ag; ctx.beginPath(); ctx.arc(0, 0, 96 * ap, 0, Math.PI * 2); ctx.fill();
+  }
   if (invulnerable && !wreck) {
     const pulse = 1 + Math.sin(Date.now() / 150) * 0.07;
-    ctx.strokeStyle = 'rgba(190,120,255,0.6)'; ctx.lineWidth = 4;
+    ctx.strokeStyle = elite ? 'rgba(255,90,90,0.65)' : 'rgba(190,120,255,0.6)'; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(0, 0, 78 * pulse, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(0, 52, 62, 12, 0, 0, Math.PI * 2); ctx.fill();
@@ -3063,9 +3132,9 @@ function drawShip(ctx, x, y, hpPct, hit, t, invulnerable, wreck) {
   ctx.strokeStyle = '#9fb8c8'; ctx.lineWidth = 2; ctx.stroke();
   if (!wreck) drawGlassesZombie(ctx, 0, -6, 1.15);
   // casco
-  ctx.fillStyle = hit > 0 ? '#fff' : (wreck ? '#3a3d44' : '#585c68');
+  ctx.fillStyle = hit > 0 ? '#fff' : (wreck ? '#3a3d44' : (elite ? '#6a2a30' : '#585c68'));
   ctx.beginPath(); ctx.ellipse(0, 4, 66, 20, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = wreck ? '#25272c' : '#3c3f4a';
+  ctx.fillStyle = wreck ? '#25272c' : (elite ? '#42181c' : '#3c3f4a');
   ctx.beginPath(); ctx.ellipse(0, 12, 50, 12, 0, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.ellipse(0, 4, 66, 20, 0, 0, Math.PI * 2); ctx.stroke();
@@ -3112,6 +3181,25 @@ function buildFinalVictoryScene() {
   // chispas
   ctx.fillStyle = 'rgba(224,177,63,0.6)';
   for (let i = 0; i < 16; i++) { ctx.beginPath(); ctx.arc(rand(40, 190), rand(80, 150), rand(0.5, 1.6), 0, Math.PI * 2); ctx.fill(); }
+}
+
+// Escena del desafío: el zombie con lentes, con sus dos naves detrás y un resplandor rojo.
+function buildChallengeScene() {
+  const el = document.getElementById('challenge-scene');
+  el.innerHTML = '';
+  const cv = document.createElement('canvas'); cv.width = 340; cv.height = 180; el.appendChild(cv);
+  const ctx = cv.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 180); g.addColorStop(0, '#1c0808'); g.addColorStop(1, '#070303');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 340, 180);
+  const rg = ctx.createRadialGradient(170, 110, 6, 170, 110, 170);
+  rg.addColorStop(0, 'rgba(209,39,45,0.45)'); rg.addColorStop(1, 'rgba(209,39,45,0)');
+  ctx.fillStyle = rg; ctx.fillRect(0, 0, 340, 180);
+  ctx.fillStyle = 'rgba(233,230,214,0.5)';
+  for (let i = 0; i < 30; i++) { ctx.beginPath(); ctx.arc(rand(0, 340), rand(0, 70), rand(0.4, 1.1), 0, Math.PI * 2); ctx.fill(); }
+  ctx.save(); ctx.scale(0.55, 0.55); drawShip(ctx, 130 / 0.55, 60 / 0.55, 1, 0, 0, false, false, false); ctx.restore();
+  ctx.save(); ctx.scale(0.55, 0.55); drawShip(ctx, 210 / 0.55, 60 / 0.55, 1, 0, 0, false, false, true); ctx.restore();
+  ctx.fillStyle = '#15120f'; ctx.fillRect(0, 150, 340, 30);
+  drawGlassesZombie(ctx, 170, 145, 3);
 }
 
 function buildGoodEndScene() {
@@ -3231,7 +3319,8 @@ function render() {
   if (level.miniPlanes) level.miniPlanes.forEach(m => { if (m.alive) drawHeli(ctx, m.x, m.y, level.time, m.hit, false); });
   if (level.boss && level.boss.active && !level.boss.defeated) drawBoss(ctx, level.boss.x, level.boss.y, level.boss.hp / level.boss.maxHp, level.boss.hit || 0, 1, level.boss.invulnerable);
   if (level.miniRobots && level.boss && level.boss.active && !level.boss.defeated) level.miniRobots.forEach(m => drawBoss(ctx, m.x, m.y, m.hp / m.maxHp, m.hit, 0.42));
-  if (level.ship && !level.ship.defeated) drawShip(ctx, level.ship.x, level.ship.y, level.ship.hp / level.ship.maxHp, level.ship.hit || 0, level.time, level.ship.invulnerable, false);
+  if (level.ship && !level.ship.defeated) drawShip(ctx, level.ship.x, level.ship.y, level.ship.hp / level.ship.maxHp, level.ship.hit || 0, level.time, level.ship.invulnerable, false, false);
+  if (level.ship2 && !level.ship2.defeated) drawShip(ctx, level.ship2.x, level.ship2.y, level.ship2.hp / level.ship2.maxHp, level.ship2.hit || 0, level.time, level.ship2.invulnerable, false, true);
 
   level.bullets.forEach(b => { ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
   level.enemyBullets.forEach(b => { ctx.fillStyle = '#d1272d'; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); });
@@ -3288,6 +3377,9 @@ function render() {
   }
   if (level.ship && !level.ship.defeated) {
     drawOffscreenIndicators(ctx, camX, camY, w, h, [level.ship], '#c07aff', 'NAVE JEFE', zoom);
+  }
+  if (level.ship2 && !level.ship2.defeated) {
+    drawOffscreenIndicators(ctx, camX, camY, w, h, [level.ship2], '#ff5a5a', 'NAVE ÉLITE', zoom);
   }
 
   drawMinimap(level);
@@ -3397,6 +3489,7 @@ function drawMinimap(level) {
   }
   if (level.boss && !level.boss.defeated) { ctx.fillStyle = '#ff5050'; ctx.fillRect(level.boss.x * sx - 3, level.boss.y * sy - 3, 6, 6); }
   if (level.ship && !level.ship.defeated) { ctx.fillStyle = '#c07aff'; ctx.beginPath(); ctx.arc(level.ship.x * sx, level.ship.y * sy, 4, 0, Math.PI * 2); ctx.fill(); }
+  if (level.ship2 && !level.ship2.defeated) { ctx.fillStyle = '#ff5a5a'; ctx.beginPath(); ctx.arc(level.ship2.x * sx, level.ship2.y * sy, 5, 0, Math.PI * 2); ctx.fill(); }
   if (level.miniRobots && level.boss && level.boss.active) {
     ctx.fillStyle = '#e07a50';
     level.miniRobots.forEach(m => { ctx.fillRect(m.x * sx - 1.5, m.y * sy - 1.5, 3, 3); });
@@ -3434,7 +3527,16 @@ function updateBossHUD(level) {
   const label = document.getElementById('hud-boss-label');
   const bar = document.getElementById('hud-boss-hp');
   const h = level.heli, b = level.boss;
-  if (level.stage.objectiveType === 'finalBattle' && level.ship && !level.ship.defeated) {
+  if (level.stage.objectiveType === 'finalBattle' && level.ship && level.ship2 && (!level.ship.defeated || !level.ship2.defeated)) {
+    const s1 = level.ship, s2 = level.ship2;
+    const pct = s => Math.max(0, Math.round(s.hp / s.maxHp * 100)) + '%';
+    const t1 = s1.defeated ? 'DERROTADO' : pct(s1);
+    const t2 = s2.defeated ? 'DERROTADO' : (s2.entering ? 'LLEGANDO...' : pct(s2));
+    hud.classList.add('show');
+    label.textContent = `ZOMBIE CON LENTES: ${t1}  ·  2º ZOMBIE (ÉLITE): ${t2}`;
+    const cur = (s1.defeated ? 0 : Math.max(0, s1.hp)) + (s2.defeated ? 0 : Math.max(0, s2.hp));
+    bar.style.width = clamp(cur / (s1.maxHp + s2.maxHp) * 100, 0, 100) + '%';
+  } else if (level.stage.objectiveType === 'finalBattle' && level.ship && !level.ship.defeated) {
     const sh = level.ship;
     hud.classList.add('show');
     label.textContent = sh.entering
@@ -3528,7 +3630,9 @@ function updateHUD(level) {
     document.getElementById('hud-objective').textContent = level.boss.active ? 'Derrota al jefe final' : 'Avanza hacia el norte del mapa';
   } else if (level.stage.objectiveType === 'finalBattle') {
     const bossesDown = (level.airBossDone ? 1 : 0) + (level.boss && level.boss.defeated ? 1 : 0);
-    document.getElementById('hud-objective').textContent = level.ship
+    document.getElementById('hud-objective').textContent = level.ship2
+      ? 'BATALLA DEFINITIVA — ¡Un segundo zombie con lentes, el doble de difícil! Derrota a los dos'
+      : level.ship
       ? 'BATALLA DEFINITIVA — Derrota al zombie con lentes en su nave espacial'
       : `BATALLA DEFINITIVA — Jefes derrotados: ${bossesDown}/2 (helicóptero y robot); luego aparece el jefe final`;
   }
