@@ -474,6 +474,7 @@ function mpJoinRoom(code) {
         const level = GAME.level;
         if (level) {
           if (data.survivors) { level.survivors = data.survivors; level.rescuedThisStage = data.rescuedThisStage; }
+          if (data.runRescued !== undefined) GAME.run.rescued = data.runRescued;
           if (data.npcs) {
             const myId = mpMyId();
             const mine = level.npcs.find(n => n.rescuedBy != null && n.rescuedBy === myId);
@@ -778,6 +779,7 @@ function mpBuildObjectivePayload(level) {
   if (level.stage.objectiveType === 'rescue') {
     payload.survivors = level.survivors.map(s => ({ id: s.id, x: s.x, y: s.y, rescued: s.rescued }));
     payload.rescuedThisStage = level.rescuedThisStage;
+    payload.runRescued = GAME.run.rescued;
   }
   if (level.stage.objectiveType === 'findNPC') {
     payload.npcs = level.npcs.map(n => ({ id: n.id, kind: n.kind, name: n.name, x: n.x, y: n.y, found: n.found, following: n.following, delivered: n.delivered, rescuedBy: n.rescuedBy }));
@@ -1616,6 +1618,7 @@ function startStageGameplay() {
     // conteo/las posiciones son compartidas entre todos (ver mpClaimSurvivor).
     rescueTarget: (mpIsActive() && stage.objectiveType === 'rescue') ? 15 : stage.rescueTarget,
     rescuedThisStage: 0,
+    rescuedBase: GAME.run.rescued, // contador de rescatados con el que empieza la etapa (etapa 2 multijugador)
     killsThisStage: 0,
     distanceTravelled: 0,
     boss: null,
@@ -2917,6 +2920,8 @@ function advanceStage() {
   stopBossMusic();
   if (mpIsActive()) MP.readyChoices = {}; // que no queden "listos" de la fase anterior
   GAME.selection.vehicle = null; // que nadie arranque la fase nueva con la montura vieja
+  const lv = GAME.level;
+  if (mpIsActive() && lv && lv.stage.objectiveType === 'findNPC') GAME.run.rescued = lv.rescuedBase + lv.npcs.filter(n => n.found).length;
   const nextStage = STAGES[GAME.stageIndex + 1];
   const isLast = !nextStage || nextStage.hidden; // la batalla definitiva no es una etapa "siguiente" normal
   if (isLast) { return; } // el final se gestiona vía la poción
@@ -3648,7 +3653,9 @@ function updateHUD(level) {
     document.getElementById('hud-vehicle-label').textContent = level.vehicle.def.name;
     document.getElementById('hud-vehicle-hp').style.width = clamp(level.vehicle.hp / level.vehicle.maxHp * 100, 0, 100) + '%';
   }
-  document.getElementById('hud-rescued').textContent = GAME.run.rescued;
+  document.getElementById('hud-rescued').textContent = (mpIsActive() && level.stage.objectiveType === 'findNPC')
+    ? level.rescuedBase + level.npcs.filter(n => n.found).length
+    : GAME.run.rescued;
   document.getElementById('hud-kills').textContent = GAME.run.totalKills;
 
   const ws = level.weaponStates[level.activeWeapon];
@@ -3671,14 +3678,15 @@ function updateHUD(level) {
   } else if (level.stage.objectiveType === 'findNPC') {
     const total = level.npcs.length;
     const delivered = level.npcs.filter(n => n.delivered).length;
+    const rescued = level.npcs.filter(n => n.found).length;
     const mine = level.npcs.find(n => n.rescuedBy === mpMyId());
     let text;
     if (total > 0 && delivered >= total) text = 'Familia a salvo. ¡Ve a la zona segura!';
-    else if (mine && !mine.delivered) text = `Escolta a ${mine.name} a la zona segura (${delivered}/${total} a salvo)`;
-    else if (mine && mine.delivered) text = `Esperando al resto del equipo (${delivered}/${total} a salvo)`;
+    else if (mine && !mine.delivered) text = `Escolta a ${mine.name} a la zona segura (${rescued}/${total} rescatados · ${delivered} a salvo)`;
+    else if (mine && mine.delivered) text = `Esperando al resto del equipo (${rescued}/${total} rescatados · ${delivered} a salvo)`;
     else {
       const pending = level.npcs.filter(n => !n.found).map(n => n.name).join(', ');
-      text = total > 1 ? `Rescata a un familiar — faltan: ${pending} (${delivered}/${total} a salvo)` : 'Encuentra al científico';
+      text = total > 1 ? `Rescata a un familiar — faltan: ${pending} (${rescued}/${total} rescatados · ${delivered} a salvo)` : 'Encuentra al científico';
     }
     document.getElementById('hud-objective').textContent = text;
   } else if (level.stage.objectiveType === 'airBoss') {
