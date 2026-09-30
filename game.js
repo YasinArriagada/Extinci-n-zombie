@@ -255,6 +255,14 @@ function mpMyId() { return MP.isHost ? 'host' : (MP.peer ? MP.peer.id : null); }
 
 function mpIsActive() { return !!MP.peer; }
 
+// Control de congestión: el estado se manda completo ~20 veces por segundo, así que
+// si la conexión de un teléfono está saturada se salta ese envío (el siguiente trae
+// el estado más nuevo). Sin esto los mensajes se acumulaban y ese jugador veía la
+// batalla con varios segundos de retraso respecto a los demás.
+function mpCanSend(c) {
+  try { const dc = c.dataChannel; return !dc || dc.bufferedAmount < 65536; } catch (e) { return true; }
+}
+
 function mpGenerateCode() {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // sin 0/O/1/I, para que no se confundan al leerlo
   let code = '';
@@ -326,7 +334,7 @@ function mpCreateRoom() {
       }
       if (data.type === 'pos') {
         mpStoreRemote(data);
-        MP.conns.forEach(c => { if (c !== conn) { try { c.send(data); } catch (e) { /* noop */ } } });
+        MP.conns.forEach(c => { if (c !== conn && mpCanSend(c)) { try { c.send(data); } catch (e) { /* noop */ } } });
         // Etapa 2: este invitado está escoltando a un familiar, se actualiza
         // su posición en la copia del Admin (que es la que se reenvía).
         if (data.ownedNpc) {
@@ -399,6 +407,7 @@ function mpCreateRoom() {
 
 function mpJoinRoom(code) {
   mpResetState();
+  MP._lastSeq = 0;
   MP.isHost = false;
   MP.myName = mpGetName();
   showScreen('screen-mp-lobby');
@@ -409,6 +418,13 @@ function mpJoinRoom(code) {
     MP.hostConn = conn;
     conn.on('open', () => { conn.send({ type: 'join', name: MP.myName }); });
     const handleHostData = data => {
+      // Estado de otra etapa (p. ej. del jefe final mientras aquí aún no empezó la
+      // batalla definitiva): se ignora para no mezclar jefes de distintas fases.
+      if (data.sid !== undefined && (data.type === 'zombies' || data.type === 'enemies' || data.type === 'objective')) {
+        if (!GAME.level || GAME.level.stage.id !== data.sid) return;
+      }
+      // El Admin da la señal para que la batalla definitiva empiece a la vez en todos.
+      if (data.type === 'final-battle-start') { if (GAME.screen === 'screen-challenge') startFinalBattle(); }
       if (data.type === 'players') { MP.code = code.toUpperCase(); MP.players = data.players; mpUpdateLobbyUI(); }
       if (data.type === 'full') { mpShowJoinError('Esa sala ya tiene 5 jugadores.'); mpLeaveRoom(); }
       if (data.type === 'begin-selection') { MP.takenColors = {}; buildCharacterGrid(); showScreen('screen-character'); }
@@ -499,8 +515,11 @@ function mpJoinRoom(code) {
       if (data.type === 'final-victory') { showFinalVictory(); }
     };
     conn.on('data', data => {
-      if (data.type === 'batch') { for (const m of data.msgs) handleHostData(m); }
-      else handleHostData(data);
+      if (data.type === 'batch') {
+        if (data.seq !== undefined) { if (data.seq <= (MP._lastSeq || 0)) return; MP._lastSeq = data.seq; }
+        if (data.sid !== undefined && (!GAME.level || GAME.level.stage.id !== data.sid)) return;
+        for (const m of data.msgs) { try { handleHostData(m); } catch (err) { console.error('mp msg error', err); } }
+      } else { try { handleHostData(data); } catch (err) { console.error('mp msg error', err); } }
     });
     conn.on('error', () => { mpShowJoinError('No se pudo conectar. Revisá el código.'); mpLeaveRoom(); });
   });
@@ -730,20 +749,23 @@ function mpBroadcastMyState(level, dt) {
   const payload = mpBuildPosPayload(level);
   if (MP.isHost) {
     const zPayload = {
-      type: 'zombies',
+      type: 'zombies', sid: level.stage.id,
       list: level.zombies.map(z => ({ id: z.id, x: Math.round(z.x), y: Math.round(z.y), angle: +z.angle.toFixed(2), type: z.type, hp: z.hp, maxHp: z.maxHp, hit: z.hit })),
       kills: GAME.run.kills, totalKills: GAME.run.totalKills, killsThisStage: level.killsThisStage,
       // Balas de zombies/helicópteros/jefe: se mandan para que TODOS vean
       // que le están disparando a quien sea (no solo al Admin). No se manda
       // el targetRef: solo el Admin aplica el daño real (ver updateBullets),
       // el resto únicamente las dibuja volar.
-      enemyBullets: level.enemyBullets.map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy), life: +b.life.toFixed(2) })),
+      enemyBullets: level.enemyBullets.slice(-160).map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy), life: +b.life.toFixed(2) })),
     };
-    const msgs = [payload, zPayload, mpBuildEnemiesPayload(level)];
+    MP._tick = (MP._tick || 0) + 1;
+    const msgs = MP._tick % 2 === 0 ? [payload, zPayload, mpBuildEnemiesPayload(level)] : [payload, mpBuildEnemiesPayload(level)];
     // Etapas 1 y 2: misión de rescate compartida (supervivientes/familia).
     if (stageHasSharedObjective(level.stage)) msgs.push(mpBuildObjectivePayload(level));
-    const batch = { type: 'batch', msgs };
-    MP.conns.forEach(c => { try { c.send(batch); } catch (e) { /* noop */ } });
+    // seq: los invitados descartan paquetes viejos que lleguen desordenados.
+    // sid: etapa a la que pertenece el estado (nunca se mezcla con otra etapa).
+    const batch = { type: 'batch', seq: (MP._batchSeq = (MP._batchSeq || 0) + 1), sid: level.stage.id, msgs };
+    MP.conns.forEach(c => { if (mpCanSend(c)) { try { c.send(batch); } catch (e) { /* noop */ } } });
   } else if (MP.hostConn) {
     try { MP.hostConn.send(payload); } catch (e) { /* noop */ }
   }
@@ -756,7 +778,7 @@ function stageHasSharedObjective(stage) {
 function mpBuildEnemiesPayload(level) {
   const potionPk = level.pickups.find(pk => pk.kind === 'potion');
   return {
-    type: 'enemies',
+    type: 'enemies', sid: level.stage.id,
     heli: level.heli ? { x: level.heli.x, y: level.heli.y, hp: level.heli.hp, maxHp: level.heli.maxHp, isBoss: level.heli.isBoss, active: level.heli.active, shielded: level.heli.shielded, hit: level.heli.hit } : null,
     miniPlanes: level.miniPlanes ? level.miniPlanes.map(m => ({ id: m.id, x: m.x, y: m.y, angle: m.angle, hp: m.hp, maxHp: m.maxHp, hit: m.hit, alive: true })) : null,
     boss: level.boss ? { x: level.boss.x, y: level.boss.y, angle: level.boss.angle, hp: level.boss.hp, maxHp: level.boss.maxHp, active: level.boss.active, defeated: level.boss.defeated, coreDefeated: level.boss.coreDefeated, invulnerable: level.boss.invulnerable, phase: level.boss.phase, hit: level.boss.hit, big: level.boss.big, scale: level.boss.scale } : null,
@@ -775,7 +797,7 @@ function mpBuildEnemiesPayload(level) {
 }
 
 function mpBuildObjectivePayload(level) {
-  const payload = { type: 'objective' };
+  const payload = { type: 'objective', sid: level.stage.id };
   if (level.stage.objectiveType === 'rescue') {
     payload.survivors = level.survivors.map(s => ({ id: s.id, x: s.x, y: s.y, rescued: s.rescued }));
     payload.rescuedThisStage = level.rescuedThisStage;
@@ -2986,9 +3008,16 @@ function showChallengeScreen() {
   stopBossMusic();
   buildChallengeScene();
   showScreen('screen-challenge');
-  setTimeout(() => {
-    if (GAME.screen === 'screen-challenge') startFinalBattle();
-  }, 6000);
+  if (mpIsActive() && !MP.isHost) {
+    // el invitado espera la señal del Admin (respaldo por si se pierde)
+    setTimeout(() => { if (GAME.screen === 'screen-challenge') startFinalBattle(); }, 12000);
+  } else {
+    setTimeout(() => {
+      if (GAME.screen !== 'screen-challenge') return;
+      if (mpIsActive()) MP.conns.forEach(c => { try { c.send({ type: 'final-battle-start' }); } catch (e) { /* noop */ } });
+      startFinalBattle();
+    }, 6000);
+  }
 }
 
 function resolveEnding(yes) {
