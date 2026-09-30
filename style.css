@@ -591,3 +591,15 @@ html,body{
 .kills-total-label{ font-size:0.7rem; letter-spacing:1.5px; color:var(--bone); opacity:0.8; }
 .kills-total-sum{ font-size:0.85rem; color:var(--bone); opacity:0.75; margin-top:4px; }
 .kills-total-num{ font-family:'Anton',sans-serif; font-size:2.6rem; color:#9dfb4c; line-height:1.1; }
+
+/* Recolección de bajas: selector de dificultad */
+.mp-create-row{ display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; }
+.mp-create-row .menu-buttons{ margin:0; }
+.kills-diff-picker{ display:none; flex-direction:column; align-items:center; gap:6px; margin:10px 0; }
+.kills-diff-picker.show{ display:flex; }
+.kills-diff-label{ font-size:0.7rem; letter-spacing:2px; color:var(--bone); opacity:0.8; }
+.kills-diff-row{ display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+.diff-btn{ padding:10px 14px; font-size:0.8rem; min-width:84px; }
+.diff-btn.selected[data-diff="easy"]{ border-color:#9dfb4c; color:#9dfb4c; box-shadow:0 0 12px rgba(157,251,76,0.45); }
+.diff-btn.selected[data-diff="normal"]{ border-color:#e0b13f; color:#e0b13f; box-shadow:0 0 12px rgba(224,177,63,0.45); }
+.diff-btn.selected[data-diff="hard"]{ border-color:#d1272d; color:#ff6b6b; box-shadow:0 0 12px rgba(209,39,45,0.55); }

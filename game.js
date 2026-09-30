@@ -499,6 +499,7 @@ function mpJoinRoom(code) {
       if (data.type === 'full') { mpShowJoinError('Esa sala ya tiene 5 jugadores.'); mpLeaveRoom(); }
       if (data.type === 'begin-selection') {
         MP.takenColors = {};
+        if (KILL_DIFFS[data.killDiff]) GAME.killDifficulty = data.killDiff;
         // el Admin puede arrancar en otra etapa (modo especial "Recolección de bajas")
         if (typeof data.stageIndex === 'number' && data.stageIndex > 0 && STAGES[data.stageIndex]) {
           GAME.phaseSkip = true; GAME.stageIndex = data.stageIndex; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
@@ -681,7 +682,7 @@ function mpBeginSelectionForAll() {
   MP.takenColors = {};
   MP.stageDone = {};
   MP.remoteStates = {};
-  MP.conns.forEach(c => { try { c.send({ type: 'begin-selection', stageIndex: GAME.phaseSkip ? GAME.stageIndex : 0 }); } catch (e) { /* noop */ } });
+  MP.conns.forEach(c => { try { c.send({ type: 'begin-selection', stageIndex: GAME.phaseSkip ? GAME.stageIndex : 0, killDiff: killDiffKey() }); } catch (e) { /* noop */ } });
   if (!GAME.phaseSkip) { GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 }; }
   buildCharacterGrid();
   showScreen('screen-character');
@@ -1089,22 +1090,26 @@ function bindMenuActions() {
     if (!btn) return;
     requestGameFullscreen();
     const action = btn.dataset.action;
-    handleAction(action);
+    handleAction(action, btn);
   });
 }
 
-function handleAction(action) {
+function handleAction(action, btn) {
   switch (action) {
+    case 'kills-diff':
+      if (btn && KILL_DIFFS[btn.dataset.diff]) { GAME.killDifficulty = btn.dataset.diff; updateKillsDiffUI(); }
+      break;
     case 'goto-character': buildCharacterGrid(); showScreen('screen-character'); break;
     case 'goto-settings': showScreen('screen-settings'); break;
     case 'goto-controls': showScreen('screen-controls'); break;
     case 'goto-credits': showScreen('screen-credits'); break;
-    case 'goto-mode-select': GAME.phaseSkip = false; showScreen('screen-mode-select'); break; // JUGAR siempre empieza desde la etapa 1
+    case 'goto-mode-select': GAME.phaseSkip = false; updateKillsDiffUI(); showScreen('screen-mode-select'); break; // JUGAR siempre empieza desde la etapa 1
     case 'goto-mp-join': {
       const modeErr = document.getElementById('mode-select-error');
       if (!mpIsOnline()) { if (modeErr) modeErr.textContent = MP_MSG_OFFLINE; break; } // sin internet no se entra
       if (modeErr) modeErr.textContent = '';
       document.getElementById('mp-join-error').textContent = '';
+      updateKillsDiffUI(); // multijugador: junto a CREAR SALA
       showScreen('screen-mp-join');
       mpEnsurePeerLib(); // se va descargando mientras el jugador escribe su nombre
       break;
@@ -1144,6 +1149,7 @@ function handleAction(action) {
       if (STAGES[GAME.stageIndex].special) {
         // Recolección de bajas: se puede jugar en solitario o en multijugador
         const modeErr = document.getElementById('mode-select-error'); if (modeErr) modeErr.textContent = '';
+        updateKillsDiffUI(); // solitario: aquí se elige la dificultad
         showScreen('screen-mode-select');
         break;
       }
@@ -1821,6 +1827,12 @@ function startStageGameplay() {
     }
   }
 
+  if (stage.objectiveType === 'killStreak') {
+    level.killDiff = killDiffKey();
+    const K = KILL_DIFFS[level.killDiff];
+    level.diff.zombies = Math.round(level.diff.zombies * K.count);
+    level.diff.speed = K.speed; level.diff.dmg = K.dmg; level.diff.zombieHp = K.hp;
+  }
   seedLevelEntities(level);
   GAME.level = level;
   GAME.paused = false;
@@ -2538,7 +2550,36 @@ function mpUpdateSpectateUI(level) {
   el.textContent = t ? `👁 Viendo a: ${t.name || 'jugador'}` : 'Esperando...';
 }
 
-function killStreakBestKey() { return mpIsActive() ? 'ez_kills_best_mp' : 'ez_kills_best_solo'; }
+// Dificultades de la Recolección de bajas. "Normal" es exactamente el comportamiento de siempre.
+//  dmg/speed/hp: multiplicadores base del daño, la velocidad y la vida de los zombies.
+//  count: cantidad de zombies a la vez · cap: tope de zombies · spawn: segundos entre apariciones.
+//  ramp: qué tan rápido sube la dificultad con el tiempo · typeTime: cuándo llegan los tipos fuertes
+//  (menor = antes: los que disparan y los jinetes aparecen antes en difícil y más tarde en fácil).
+const KILL_DIFFS = {
+  easy:   { label: 'FÁCIL',   dmg: 0.65, speed: 0.85, hp: 0.75, count: 0.7, cap: 45, spawn: 0.85, ramp: 0.6,  typeTime: 1.7 },
+  normal: { label: 'NORMAL',  dmg: 1,    speed: 1,    hp: 1,    count: 1,   cap: 60, spawn: 0.6,  ramp: 1,    typeTime: 1   },
+  hard:   { label: 'DIFÍCIL', dmg: 1.35, speed: 1.1,  hp: 1.4,  count: 1.4, cap: 85, spawn: 0.4,  ramp: 1.5,  typeTime: 0.6 },
+};
+function killDiffKey() { return KILL_DIFFS[GAME.killDifficulty] ? GAME.killDifficulty : 'normal'; }
+function killDiffCfg(level) { return KILL_DIFFS[(level && level.killDiff) || killDiffKey()] || KILL_DIFFS.normal; }
+
+// Muestra los 3 botones de dificultad solo cuando se eligió la Recolección de bajas en SALTO DE FASE
+// (en la pantalla de modo, para solitario, y junto a CREAR SALA, para multijugador).
+function updateKillsDiffUI() {
+  const st = STAGES[GAME.stageIndex];
+  const show = !!(GAME.phaseSkip && st && st.objectiveType === 'killStreak');
+  const cur = killDiffKey();
+  document.querySelectorAll('.kills-diff-picker').forEach(p => {
+    p.classList.toggle('show', show);
+    p.querySelectorAll('.diff-btn').forEach(b => b.classList.toggle('selected', b.dataset.diff === cur));
+  });
+}
+
+// El récord se guarda aparte por dificultad (normal conserva el récord de siempre).
+function killStreakBestKey() {
+  const suffix = killDiffKey() === 'normal' ? '' : '_' + killDiffKey();
+  return (mpIsActive() ? 'ez_kills_best_mp' : 'ez_kills_best_solo') + suffix;
+}
 function killStreakBest() {
   try { return parseInt(localStorage.getItem(killStreakBestKey()), 10) || 0; } catch (e) { return 0; }
 }
@@ -2548,7 +2589,7 @@ function killStreakSaveBest(n) {
 
 // Tipos de zombie que pueden aparecer según el tiempo de partida (más variedad con el tiempo).
 function killStreakTypes(level) {
-  const t = level.time || 0;
+  const t = (level.time || 0) / killDiffCfg(level).typeTime;
   return t < 40 ? ['walker'] : t < 100 ? ['walker', 'walker', 'gunner'] : ['walker', 'walker', 'gunner', 'rider'];
 }
 
@@ -2556,14 +2597,14 @@ function killStreakTypes(level) {
 // tiempo, mantiene la cantidad de zombies y, en multijugador, detecta cuándo cayó todo el equipo.
 function updateKillStreak(level, dt) {
   if (level.subPhase !== 'play') return;
-  const D = level.diff, t = level.time;
-  D.speed = Math.min(1.5, 1 + t / 360);     // hasta +50% de velocidad y cadencia (a los 3 min)
-  D.dmg = Math.min(1.6, 1 + t / 300);       // hasta +60% de daño (a los 3 min)
-  D.zombieHp = Math.min(2.5, 1 + t / 150);  // los nuevos zombies llegan con hasta 2.5x de vida
+  const D = level.diff, t = level.time, K = killDiffCfg(level);
+  D.speed = K.speed * Math.min(1.5, 1 + K.ramp * t / 360);     // en normal: hasta +50% de velocidad y cadencia (a los 3 min)
+  D.dmg = K.dmg * Math.min(1.6, 1 + K.ramp * t / 300);         // en normal: hasta +60% de daño (a los 3 min)
+  D.zombieHp = K.hp * Math.min(2.5, 1 + K.ramp * t / 150);     // en normal: los nuevos zombies llegan con hasta 2.5x de vida
   const players = mpIsActive() ? Math.max(1, MP.players.length) : 1;
-  const target = Math.min(60, 18 + Math.floor(t / 10) + (players - 1) * 6);
+  const target = Math.min(K.cap, Math.round((18 + Math.floor(t * K.ramp / 10) + (players - 1) * 6) * K.count));
   level._ksSpawn = (level._ksSpawn || 0) - dt;
-  if (level.zombies.length < target && level._ksSpawn <= 0) { level._ksSpawn = 0.6; spawnZombie(level); }
+  if (level.zombies.length < target && level._ksSpawn <= 0) { level._ksSpawn = K.spawn; spawnZombie(level); }
 
   // Multijugador: se anota cuánto aguantó cada jugador (momento en que cayó)
   if (mpIsActive() && MP.isHost) {
@@ -2604,6 +2645,8 @@ function killStreakFinish(level, kills, seconds, board) {
   level.subPhase = 'complete';
   cancelAnimationFrame(GAME.rafId);
   stopBossMusic();
+  const diffEl = document.getElementById('kills-over-diff');
+  if (diffEl) diffEl.textContent = 'DIFICULTAD: ' + killDiffCfg(level).label;
   const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   // En multijugador el récord personal se compara con las bajas de ESTE jugador, no las del equipo.
   const myId = mpMyId();
@@ -4064,10 +4107,10 @@ function updateHUD(level) {
       const mine = (level.killsBy && level.killsBy[mpMyId()]) || 0;
       level._mineKills = mine;
       document.getElementById('hud-objective').textContent =
-        `RECOLECCIÓN DE BAJAS — Tus bajas: ${mine}  ·  Equipo: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Tu mejor: ${Math.max(level._best, mine)}`;
+        `RECOLECCIÓN DE BAJAS (${killDiffCfg(level).label}) — Tus bajas: ${mine}  ·  Equipo: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Tu mejor: ${Math.max(level._best, mine)}`;
     } else {
       document.getElementById('hud-objective').textContent =
-        `RECOLECCIÓN DE BAJAS — Bajas: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Mejor: ${Math.max(level._best, level.killsThisStage)}`;
+        `RECOLECCIÓN DE BAJAS (${killDiffCfg(level).label}) — Bajas: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Mejor: ${Math.max(level._best, level.killsThisStage)}`;
     }
   } else if (level.stage.objectiveType === 'survive') {
     const pct = Math.min(100, Math.round(level.killsThisStage / level.stage.surviveKillTarget * 100));

@@ -131,6 +131,14 @@
         <button class="btn btn-primary" data-action="goto-character">SOLITARIO</button>
         <button class="btn btn-secondary" data-action="goto-mp-join">MULTIJUGADOR</button>
       </nav>
+      <div class="kills-diff-picker">
+          <div class="kills-diff-label">DIFICULTAD</div>
+          <div class="kills-diff-row">
+            <button class="btn btn-secondary diff-btn" data-action="kills-diff" data-diff="easy">FÁCIL</button>
+            <button class="btn btn-secondary diff-btn selected" data-action="kills-diff" data-diff="normal">NORMAL</button>
+            <button class="btn btn-secondary diff-btn" data-action="kills-diff" data-diff="hard">DIFÍCIL</button>
+          </div>
+        </div>
       <p class="mp-error" id="mode-select-error"></p>
       <button class="btn btn-secondary mode-select-back" data-action="back-menu">VOLVER</button>
     </div>
@@ -145,9 +153,19 @@
         <label for="mp-name-input" class="mp-name-label">Tu nombre de jugador</label>
         <input type="text" id="mp-name-input" maxlength="14" placeholder="Ej: Jugador" class="mp-name-input" autocomplete="off">
       </div>
-      <nav class="menu-buttons">
-        <button class="btn btn-primary" data-action="mp-create">CREAR SALA</button>
-      </nav>
+      <div class="mp-create-row">
+        <nav class="menu-buttons">
+          <button class="btn btn-primary" data-action="mp-create">CREAR SALA</button>
+        </nav>
+        <div class="kills-diff-picker">
+          <div class="kills-diff-label">DIFICULTAD</div>
+          <div class="kills-diff-row">
+            <button class="btn btn-secondary diff-btn" data-action="kills-diff" data-diff="easy">FÁCIL</button>
+            <button class="btn btn-secondary diff-btn selected" data-action="kills-diff" data-diff="normal">NORMAL</button>
+            <button class="btn btn-secondary diff-btn" data-action="kills-diff" data-diff="hard">DIFÍCIL</button>
+          </div>
+        </div>
+      </div>
       <div class="mp-join-row">
         <input type="text" id="mp-code-input" maxlength="4" placeholder="CÓDIGO" class="mp-code-input" autocomplete="off" autocapitalize="characters">
         <button class="btn btn-secondary" data-action="mp-join">UNIRSE</button>
@@ -455,6 +473,7 @@
   <section id="screen-kills-over" class="screen overlay-screen">
     <div class="panel-frame">
       <h2 class="panel-title glow-text-red">FIN DE LA RECOLECCIÓN</h2>
+      <p class="panel-sub" id="kills-over-diff" style="color:#e0b13f;"></p>
       <!-- Solitario -->
       <div id="kills-solo-box">
         <p class="panel-sub">BAJAS DE ZOMBIES</p>
