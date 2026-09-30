@@ -1854,14 +1854,18 @@ function seedLevelEntities(level) {
     // MULTIJUGADOR: robot GIGANTE (1.8x de tamaño), con 5 veces más vida, 8 escoltas,
     // disparos más rápidos y más densos, y llama refuerzos de zombies (ver updateBoss).
     // En solitario el jefe se mantiene igual que siempre.
-    const BIG = mpIsActive();
-    const bossHp = BIG ? 7500 : 1500;
-    const escortN = BIG ? 8 : 5;
-    const orbitMul = BIG ? 1.7 : 1;
+    // SOLITARIO: también es un robot grande (1.6x), con 3 veces más vida (4500), 6 escoltas y
+    // muchas más balas (ver updateBoss), pero sin refuerzos de zombies y con balas no tan rápidas
+    // para que siga siendo esquivable.
+    const MULTI = mpIsActive();
+    const BIG = true;
+    const bossHp = MULTI ? 7500 : 4500;
+    const escortN = MULTI ? 8 : 6;
+    const orbitMul = MULTI ? 1.7 : 1.45;
     level.boss = {
       x: WORLD.w / 2, y: 220, hp: bossHp, maxHp: bossHp, phase: 1, active: false,
       angle: 0, cd: 0, moveT: 0, defeated: false, coreDefeated: false,
-      big: BIG, scale: BIG ? 1.8 : 1, summonT: 10,
+      big: BIG, solo: !MULTI, scale: MULTI ? 1.8 : 1.6, summonT: 10,
     };
     // mini robots que lo escoltan y disparan también al jugador
     level.miniRobots = Array.from({ length: escortN }, (_, i) => {
@@ -2824,8 +2828,11 @@ function updateBoss(level, dt) {
 
   // Robot gigante (multijugador): dispara más rápido, sus balas van más rápido y
   // en más cantidad, y llama refuerzos de zombies cada cierto tiempo.
-  const big = !!b.big, fm = big ? 0.75 : 1, sm = big ? 1.15 : 1, xs = big ? 2 : 0;
-  if (big) {
+  // En solitario (b.solo): dispara más rápido y con más balas, pero sin refuerzos de zombies
+  // y con balas algo más lentas que en multijugador, para poder esquivarlas.
+  const big = !!b.big, solo = !!b.solo;
+  const fm = big ? (solo ? 0.8 : 0.75) : 1, sm = big ? (solo ? 1.05 : 1.15) : 1, xs = big ? 2 : 0;
+  if (big && !solo) {
     b.summonT = (b.summonT === undefined ? 10 : b.summonT) - dt;
     if (b.summonT <= 0) {
       b.summonT = escorted ? 14 : (b.phase === 3 ? 6 : 10);
@@ -2860,6 +2867,13 @@ function updateBoss(level, dt) {
       b.cd = fireRate;
       const a = b.angle + rand(-0.06, 0.06);
       level.enemyBullets.push({ x: b.x, y: b.y, vx: Math.cos(a) * 250 * sm, vy: Math.sin(a) * 250 * sm, dmg: 9, life: 2.6, targetRef: mpTargetRef(nearest) });
+      if (solo) {
+        // abanico ancho a los lados de la bala principal: hay huecos por donde pasar
+        [-0.34, -0.17, 0.17, 0.34].forEach(off => {
+          const a2 = b.angle + off;
+          level.enemyBullets.push({ x: b.x, y: b.y, vx: Math.cos(a2) * 230 * sm, vy: Math.sin(a2) * 230 * sm, dmg: 7, life: 2.6, targetRef: mpTargetRef(nearest) });
+        });
+      }
     }
   } else {
     // fase 2 (<=50%) y fase 3 (<=30%): patrones variados de "cualquier bala",
@@ -2867,7 +2881,7 @@ function updateBoss(level, dt) {
     if (b.cd <= 0) {
       b.cd = (b.phase === 3 ? 0.42 : 0.68) * fm;
       const bulletSpeed = (250 + b.phase * 35) * sm;
-      const pattern = randi(0, 2);
+      const pattern = randi(0, solo ? 3 : 2);
       const aimAngle = b.angle;
       if (pattern === 0) {
         const shots = (b.phase === 3 ? 5 : 3) + xs;
@@ -2881,6 +2895,17 @@ function updateBoss(level, dt) {
         for (let i = 0; i < count; i++) {
           const a = aimAngle - arc / 2 + (arc / (count - 1)) * i;
           level.enemyBullets.push({ x: b.x, y: b.y, vx: Math.cos(a) * bulletSpeed, vy: Math.sin(a) * bulletSpeed, dmg: 8, life: 2.6, targetRef: mpTargetRef(nearest) });
+        }
+      } else if (pattern === 3) {
+        // doble anillo: el segundo anillo va más lento y desfasado, dejando huecos para esquivar
+        const count = (b.phase === 3 ? 14 : 10) + xs;
+        const off = rand(0, Math.PI * 2);
+        for (let ring = 0; ring < 2; ring++) {
+          for (let i = 0; i < count; i++) {
+            const a = off + (Math.PI * 2 / count) * i + ring * (Math.PI / count);
+            const sp = bulletSpeed * (ring ? 0.6 : 0.9);
+            level.enemyBullets.push({ x: b.x, y: b.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, dmg: 7, life: 3.0, targetRef: mpTargetRef(nearest) });
+          }
         }
       } else {
         const count = (b.phase === 3 ? 16 : 10) + xs * 2;

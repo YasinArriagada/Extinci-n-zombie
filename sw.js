@@ -5,7 +5,7 @@
  *
  * Si agregas archivos nuevos al juego (música, imágenes), añádelos a CORE y sube CACHE_VERSION.
  */
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE = 'extincion-zombie-' + CACHE_VERSION;
 const CORE = [
   './', 'index.html', 'game.js', 'style.css', 'favicon.svg',
