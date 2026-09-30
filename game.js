@@ -143,6 +143,20 @@ const STAGES = [
     palette: { ground: '#1c0f0f', accent: '#2a1414' },
     objectiveText: 'Derrota a los dos jefes a la vez: el helicóptero principal y el zombie robótico. Después aparecerá el zombie con lentes en su nave espacial y, cuando llegue a la mitad de su vida, un segundo zombie con lentes el doble de difícil. Todos sus enemigos están de vuelta, más fuertes.',
   },
+  // MODO ESPECIAL "RECOLECCIÓN DE BAJAS" (solitario y multijugador). Se accede desde SALTO DE FASE.
+  // Sin meta ni zona segura: se acumulan bajas de zombies hasta caer (en multijugador, hasta que
+  // cae todo el equipo). Con el tiempo aparecen más zombies, más fuertes y de más tipos
+  // (ver updateKillStreak y killStreakTypes).
+  {
+    id: 7, key: 'kills', name: 'RECOLECCIÓN DE BAJAS', special: true,
+    vehicleSet: null, requireWeapons: false, onFoot: true, companionSelect: true,
+    resource: null, canRepair: false,
+    objectiveType: 'killStreak',
+    zombieTypes: ['walker'],
+    difficulty: { zombies: 18, speed: 1, dmg: 1, zombieHp: 1 }, // valores iniciales; suben con el tiempo
+    palette: { ground: '#1a1010', accent: '#261414' },
+    objectiveText: 'Elimina a todos los zombies que puedas hasta que caigas. Con el tiempo llegan más, más rápidos y más fuertes. En multijugador termina cuando cae todo el equipo.',
+  },
 ];
 
 // Familia a rescatar en la Etapa 2 cuando es multijugador: la cantidad de
@@ -181,6 +195,7 @@ const STAGE_MUSIC = {
   absurd: 'Avion.mp3',        // Fase 3 — VEHÍCULOS ABSURDOS
   final: 'Music_robot.mp3',   // Fase 5 — BATALLA FINAL
   finalx: 'Music_robot.mp3',  // BATALLA DEFINITIVA (tras el "NO" del Admin)
+  kills: 'Music_robot.mp3',   // MODO ESPECIAL — RECOLECCIÓN DE BAJAS
 };
 
 const MUSIC = new Audio();
@@ -482,7 +497,18 @@ function mpJoinRoom(code) {
       if (data.type === 'final-battle-start') { if (GAME.screen === 'screen-challenge') startFinalBattle(); }
       if (data.type === 'players') { MP.code = code.toUpperCase(); MP.players = data.players; mpUpdateLobbyUI(); }
       if (data.type === 'full') { mpShowJoinError('Esa sala ya tiene 5 jugadores.'); mpLeaveRoom(); }
-      if (data.type === 'begin-selection') { MP.takenColors = {}; buildCharacterGrid(); showScreen('screen-character'); }
+      if (data.type === 'begin-selection') {
+        MP.takenColors = {};
+        // el Admin puede arrancar en otra etapa (modo especial "Recolección de bajas")
+        if (typeof data.stageIndex === 'number' && data.stageIndex > 0 && STAGES[data.stageIndex]) {
+          GAME.phaseSkip = true; GAME.stageIndex = data.stageIndex; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
+        } else GAME.phaseSkip = false;
+        buildCharacterGrid(); showScreen('screen-character');
+      }
+      if (data.type === 'kills-over') {
+        const lv = GAME.level;
+        if (lv && lv.stage.objectiveType === 'killStreak') killStreakFinish(lv, data.kills, data.time);
+      }
       if (data.type === 'waiting-status') { mpUpdateWaitingUI(data.readyIds); }
       if (data.type === 'colors-taken') { MP.takenColors = data.taken; mpApplyTakenColorsToUI(); }
       if (data.type === 'begin-stage') { mpStartStageForAll(); }
@@ -600,6 +626,7 @@ function mpResetState() {
 }
 
 function mpLeaveRoom() {
+  GAME.phaseSkip = false;
   mpResetState();
   showScreen('screen-menu');
 }
@@ -653,7 +680,7 @@ function mpBeginSelectionForAll() {
   MP.takenColors = {};
   MP.stageDone = {};
   MP.remoteStates = {};
-  MP.conns.forEach(c => { try { c.send({ type: 'begin-selection' }); } catch (e) { /* noop */ } });
+  MP.conns.forEach(c => { try { c.send({ type: 'begin-selection', stageIndex: GAME.phaseSkip ? GAME.stageIndex : 0 }); } catch (e) { /* noop */ } });
   if (!GAME.phaseSkip) { GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 }; }
   buildCharacterGrid();
   showScreen('screen-character');
@@ -1071,7 +1098,7 @@ function handleAction(action) {
     case 'goto-settings': showScreen('screen-settings'); break;
     case 'goto-controls': showScreen('screen-controls'); break;
     case 'goto-credits': showScreen('screen-credits'); break;
-    case 'goto-mode-select': showScreen('screen-mode-select'); break;
+    case 'goto-mode-select': GAME.phaseSkip = false; showScreen('screen-mode-select'); break; // JUGAR siempre empieza desde la etapa 1
     case 'goto-mp-join': {
       const modeErr = document.getElementById('mode-select-error');
       if (!mpIsOnline()) { if (modeErr) modeErr.textContent = MP_MSG_OFFLINE; break; } // sin internet no se entra
@@ -1111,10 +1138,16 @@ function handleAction(action) {
       GAME.phaseSkip = true;
       GAME.stageIndex = GAME.phaseSkipTarget;
       GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
+      if (STAGES[GAME.stageIndex].special) {
+        // Recolección de bajas: se puede jugar en solitario o en multijugador
+        const modeErr = document.getElementById('mode-select-error'); if (modeErr) modeErr.textContent = '';
+        showScreen('screen-mode-select');
+        break;
+      }
       buildCharacterGrid();
       showScreen('screen-character');
       break;
-    case 'back-menu': showScreen('screen-menu'); break;
+    case 'back-menu': GAME.phaseSkip = false; showScreen('screen-menu'); break;
     case 'goto-vehicle':
       if (!GAME.phaseSkip) { GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 }; }
       GAME.phaseSkip = false;
@@ -1133,6 +1166,21 @@ function handleAction(action) {
     case 'potion-yes': mpChooseEnding(true); break;
     case 'potion-no': mpChooseEnding(false); break;
     case 'final-victory-continue': showGoodEnd(); break; // solo local: cada jugador pasa al final bueno a su ritmo
+    case 'kills-again':
+      GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
+      if (mpIsActive()) {
+        if (!MP.isHost) break; // solo el Admin vuelve a empezar para todos
+        GAME.phaseSkip = true;
+        GAME.stageIndex = STAGES.findIndex(st => st.objectiveType === 'killStreak');
+        mpBeginSelectionForAll();
+      } else startStageGameplay();
+      break;
+    case 'kills-exit': {
+      const wasMp = mpIsActive();
+      fullReset();
+      if (wasMp) mpLeaveRoom(); else showScreen('screen-menu');
+      break;
+    }
     case 'force-fullscreen': requestGameFullscreen(true); break;
   }
 }
@@ -1159,12 +1207,14 @@ function buildPhaseGrid() {
     const card = document.createElement('div');
     card.className = 'pick-card';
     card.innerHTML = `<canvas class="pick-card-canvas" width="180" height="100"></canvas>
-      <div class="pick-card-name">ETAPA ${stage.id} — ${stage.name}</div>
+      <div class="pick-card-name">${stage.special ? 'MODO ESPECIAL' : 'ETAPA ' + stage.id} — ${stage.name}</div>
       <div class="pick-card-desc">${stage.objectiveText}</div>
       <div class="pick-check">✔ SELECCIONADA</div>`;
     const cv = card.querySelector('canvas');
     drawPreview(cv, c => {
-      if (stage.onFoot) {
+      if (stage.special) {
+        drawZombie(c, 55, 62, 0.4, 'walker', 0); drawZombie(c, 125, 62, 2.7, 'gunner', 0); drawZombie(c, 90, 46, 1.6, 'walker', 0);
+      } else if (stage.onFoot) {
         drawBoss(c, 90, 55, 1, 0, 0.95, false);
       } else {
         const v = VEHICLE_SETS[stage.vehicleSet][0];
@@ -1272,7 +1322,8 @@ function buildVehicleGrid(stage) {
 
 function buildCompanionGrid() {
   document.getElementById('vehicle-title').textContent = 'ELIGE TU AYUDANTE';
-  document.getElementById('vehicle-sub').textContent = 'Etapa 5 — Batalla final';
+  const cst = STAGES[GAME.stageIndex];
+  document.getElementById('vehicle-sub').textContent = cst && cst.special ? `Modo especial — ${cst.name}` : 'Etapa 5 — Batalla final';
   const grid = document.getElementById('vehicle-grid');
   grid.innerHTML = '';
   GAME.selection.companion = null;
@@ -1359,7 +1410,7 @@ function stageObjectiveText(stage) {
 
 function beginStageIntro() {
   const stage = STAGES[GAME.stageIndex];
-  document.getElementById('stage-intro-num').textContent = `ETAPA ${stage.id}`;
+  document.getElementById('stage-intro-num').textContent = stage.special ? 'MODO ESPECIAL' : `ETAPA ${stage.id}`;
   document.getElementById('stage-intro-title').textContent = stage.name;
   document.getElementById('stage-intro-obj').textContent = stageObjectiveText(stage);
   showScreen('screen-stage-intro');
@@ -1749,7 +1800,7 @@ function startStageGameplay() {
     interactTarget: null,
     dead: false, // true cuando ESTE jugador (local) fue eliminado, en multijugador
     potionEligible: null, potionHolder: null, // etapa 3: quién puede/ya agarró la poción
-    diff: stage.difficulty || null, // multiplicadores de dificultad (solo la batalla definitiva)
+    diff: stage.difficulty ? { ...stage.difficulty } : null, // multiplicadores de dificultad (batalla definitiva y recolección de bajas)
   };
 
   if (stage.onFoot) {
@@ -1923,7 +1974,7 @@ function seedLevelEntities(level) {
 }
 
 function spawnZombie(level) {
-  const type = choice(level.stage.zombieTypes);
+  const type = choice(level.stage.objectiveType === 'killStreak' ? killStreakTypes(level) : level.stage.zombieTypes);
   const edge = randi(0, 3);
   let x, y;
   if (edge === 0) { x = rand(0, WORLD.w); y = 0; }
@@ -2185,6 +2236,7 @@ function update(dt) {
     if (stage.objectiveType === 'airBoss' || stage.objectiveType === 'finalBattle') updateHelis(level, edt);
     if (level.miniPlanes) updateMiniPlanes(level, edt);
     if (stage.objectiveType === 'boss' || stage.objectiveType === 'finalBattle') updateBoss(level, edt);
+    if (stage.objectiveType === 'killStreak') updateKillStreak(level, dt);
     if (level.miniRobots) updateMiniRobots(level, edt);
     if (stage.objectiveType === 'finalBattle') { updateShip(level, edt); updateFinalBattle(level, dt); }
   }
@@ -2442,6 +2494,65 @@ function updateBullets(level, dt) {
   }
 }
 
+/* ------------- MODO ESPECIAL: RECOLECCIÓN DE BAJAS ------------- */
+
+function killStreakBestKey() { return mpIsActive() ? 'ez_kills_best_mp' : 'ez_kills_best_solo'; }
+function killStreakBest() {
+  try { return parseInt(localStorage.getItem(killStreakBestKey()), 10) || 0; } catch (e) { return 0; }
+}
+function killStreakSaveBest(n) {
+  try { localStorage.setItem(killStreakBestKey(), String(n)); } catch (e) { /* sin almacenamiento: no pasa nada */ }
+}
+
+// Tipos de zombie que pueden aparecer según el tiempo de partida (más variedad con el tiempo).
+function killStreakTypes(level) {
+  const t = level.time || 0;
+  return t < 40 ? ['walker'] : t < 100 ? ['walker', 'walker', 'gunner'] : ['walker', 'walker', 'gunner', 'rider'];
+}
+
+// Solo lo corre quien controla la simulación real (solitario o Admin): sube la dificultad con el
+// tiempo, mantiene la cantidad de zombies y, en multijugador, detecta cuándo cayó todo el equipo.
+function updateKillStreak(level, dt) {
+  if (level.subPhase !== 'play') return;
+  const D = level.diff, t = level.time;
+  D.speed = Math.min(1.5, 1 + t / 360);     // hasta +50% de velocidad y cadencia (a los 3 min)
+  D.dmg = Math.min(1.6, 1 + t / 300);       // hasta +60% de daño (a los 3 min)
+  D.zombieHp = Math.min(2.5, 1 + t / 150);  // los nuevos zombies llegan con hasta 2.5x de vida
+  const players = mpIsActive() ? Math.max(1, MP.players.length) : 1;
+  const target = Math.min(60, 18 + Math.floor(t / 10) + (players - 1) * 6);
+  level._ksSpawn = (level._ksSpawn || 0) - dt;
+  if (level.zombies.length < target && level._ksSpawn <= 0) { level._ksSpawn = 0.6; spawnZombie(level); }
+
+  // Multijugador: la partida termina cuando cayeron TODOS (el Admin lo decide y avisa al resto)
+  if (mpIsActive() && MP.isHost && level.dead) {
+    const someoneAlive = MP.conns.some(c => { const s = MP.remoteStates[c.peer]; return !s || !s.dead; });
+    if (!someoneAlive) {
+      const kills = level.killsThisStage, time = Math.floor(level.time);
+      MP.conns.forEach(c => { try { c.send({ type: 'kills-over', kills, time }); } catch (e) { /* noop */ } });
+      killStreakFinish(level, kills, time);
+    }
+  }
+}
+
+// Pantalla de resultados (solitario, Admin e invitados). Guarda el mejor récord del dispositivo.
+function killStreakFinish(level, kills, seconds) {
+  if (!level || level.subPhase === 'complete') return;
+  level.subPhase = 'complete';
+  cancelAnimationFrame(GAME.rafId);
+  stopBossMusic();
+  const prev = killStreakBest();
+  const record = kills > prev;
+  if (record) killStreakSaveBest(kills);
+  const mm = Math.floor(seconds / 60), ss = String(seconds % 60).padStart(2, '0');
+  document.getElementById('kills-over-count').textContent = String(kills);
+  document.getElementById('kills-over-time').textContent = `Tiempo sobrevivido: ${mm}:${ss}`;
+  document.getElementById('kills-over-best').textContent = record ? '¡NUEVO RÉCORD!' : `Tu mejor marca: ${prev} bajas`;
+  const isGuest = mpIsActive() && !MP.isHost;
+  document.getElementById('btn-kills-again').style.display = isGuest ? 'none' : '';
+  document.getElementById('kills-over-wait').style.display = isGuest ? '' : 'none';
+  showScreen('screen-kills-over');
+}
+
 function spawnDeathParticles(level, x, y) {
   for (let i = 0; i < 8; i++) {
     level.particles.push({ x, y, vx: rand(-80, 80), vy: rand(-80, 80), life: 0.4, color: '#4a6b2a' });
@@ -2481,7 +2592,12 @@ function markLocalPlayerDead(level, title, sub) {
     const titleEl = document.getElementById('dead-overlay-title');
     const subEl = document.getElementById('dead-overlay-sub');
     if (titleEl) titleEl.textContent = title;
-    if (subEl) subEl.textContent = sub + ' Los enemigos ya no te atacan. Presiona "Volver a jugar" para reaparecer aquí mismo.';
+    const ks = level.stage.objectiveType === 'killStreak';
+    if (subEl) subEl.textContent = ks
+      ? sub + ' Miras la partida hasta que caiga todo el equipo.'
+      : sub + ' Los enemigos ya no te atacan. Presiona "Volver a jugar" para reaparecer aquí mismo.';
+    const reviveBtn = overlay.querySelector('[data-action="revive-player"]');
+    if (reviveBtn) reviveBtn.style.display = ks ? 'none' : ''; // en recolección de bajas no se revive
     overlay.classList.add('show');
   }
   mpSendMyStateNow(level); // avisar de inmediato, sin esperar el próximo tick
@@ -2503,6 +2619,7 @@ function markLocalPlayerDead(level, title, sub) {
 // enemigos vuelven a perseguirlo y atacarlo con normalidad.
 function reviveLocalPlayer(level) {
   if (!level || !level.dead) return;
+  if (level.stage.objectiveType === 'killStreak') return; // recolección de bajas: caer es definitivo
   level.dead = false;
   if (level.vehicle) level.vehicle.hp = level.vehicle.maxHp;
   level.player.hp = level.player.maxHp;
@@ -2520,6 +2637,8 @@ function onVehicleDestroyed(level) {
 
 function onPlayerDown(level) {
   if (level.subPhase === 'complete' || level.dead) return;
+  // Recolección de bajas en solitario: al caer termina la partida y se muestran los resultados
+  if (level.stage.objectiveType === 'killStreak' && !mpIsActive()) { killStreakFinish(level, level.killsThisStage, Math.floor(level.time)); return; }
   if (mpIsActive()) markLocalPlayerDead(level, 'HAS CAÍDO', 'Fuiste derribado por los zombies.');
   else showRealStageFail(level, 'HAS CAÍDO', 'Fuiste derribado por los zombies.');
 }
@@ -3702,6 +3821,7 @@ function drawDecor(ctx, level, camX, camY, vw, vh) {
 }
 
 function drawSafeZone(ctx, level) {
+  if (level.stage.objectiveType === 'killStreak') return; // este modo no tiene zona segura
   const s = level.safeZone;
   const pulse = 1 + Math.sin(level.time * 3) * 0.06;
   ctx.strokeStyle = 'rgba(157,251,76,0.6)'; ctx.lineWidth = 3;
@@ -3717,7 +3837,7 @@ function drawMinimap(level) {
   ctx.fillStyle = 'rgba(20,26,18,0.7)'; ctx.fillRect(0, 0, 140, 140);
   const sx = 140 / WORLD.w, sy = 140 / WORLD.h;
   ctx.fillStyle = '#9dfb4c';
-  ctx.beginPath(); ctx.arc(level.safeZone.x * sx, level.safeZone.y * sy, 4, 0, Math.PI * 2); ctx.fill();
+  if (level.stage.objectiveType !== 'killStreak') { ctx.beginPath(); ctx.arc(level.safeZone.x * sx, level.safeZone.y * sy, 4, 0, Math.PI * 2); ctx.fill(); }
   ctx.fillStyle = '#d1272d';
   level.zombies.forEach(z => { ctx.fillRect(z.x * sx - 1, z.y * sy - 1, 2, 2); });
   if (level.stage.objectiveType === 'rescue') { ctx.fillStyle = '#e9e6d6'; level.survivors.forEach(s => { if (!s.rescued) ctx.fillRect(s.x * sx - 1.5, s.y * sy - 1.5, 3, 3); }); }
@@ -3841,7 +3961,12 @@ function updateHUD(level) {
   if (level.stage.objectiveType === 'rescue') { const el = document.createElement('div'); el.className = 'inv-item'; el.textContent = `${level.rescuedThisStage}/${level.rescueTarget}`; inv.appendChild(el); }
   if (level.hasPotion) { const el = document.createElement('div'); el.className = 'inv-item'; el.textContent = '🧪'; inv.appendChild(el); }
 
-  if (level.stage.objectiveType === 'survive') {
+  if (level.stage.objectiveType === 'killStreak') {
+    if (level._best === undefined) level._best = killStreakBest();
+    const secs = Math.floor(level.time), mm = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, '0');
+    document.getElementById('hud-objective').textContent =
+      `RECOLECCIÓN DE BAJAS — Bajas: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Mejor: ${Math.max(level._best, level.killsThisStage)}`;
+  } else if (level.stage.objectiveType === 'survive') {
     const pct = Math.min(100, Math.round(level.killsThisStage / level.stage.surviveKillTarget * 100));
     document.getElementById('hud-objective').textContent = level.killsThisStage >= level.stage.surviveKillTarget
       ? '¡Objetivo cumplido! Ve a la zona segura'
