@@ -455,10 +455,29 @@
   <section id="screen-kills-over" class="screen overlay-screen">
     <div class="panel-frame">
       <h2 class="panel-title glow-text-red">FIN DE LA RECOLECCIÓN</h2>
-      <p class="panel-sub">BAJAS DE ZOMBIES</p>
-      <div id="kills-over-count" style="font-family:'Anton',sans-serif;font-size:4rem;color:#9dfb4c;text-align:center;line-height:1.1;margin:4px 0 10px;">0</div>
-      <p class="panel-sub" id="kills-over-time">Tiempo sobrevivido: 0:00</p>
-      <p class="panel-sub" id="kills-over-best" style="color:#e0b13f;">Tu mejor marca: 0 bajas</p>
+      <!-- Solitario -->
+      <div id="kills-solo-box">
+        <p class="panel-sub">BAJAS DE ZOMBIES</p>
+        <div id="kills-over-count" style="font-family:'Anton',sans-serif;font-size:4rem;color:#9dfb4c;text-align:center;line-height:1.1;margin:4px 0 10px;">0</div>
+        <p class="panel-sub" id="kills-over-time">Tiempo sobrevivido: 0:00</p>
+        <p class="panel-sub" id="kills-over-best" style="color:#e0b13f;">Tu mejor marca: 0 bajas</p>
+      </div>
+      <!-- Multijugador: clasificación por jugador + total del equipo -->
+      <div id="kills-board-box" style="display:none;">
+        <p class="panel-sub">CLASIFICACIÓN</p>
+        <div class="kills-board-scroll">
+          <table class="kills-board">
+            <thead><tr><th>#</th><th>JUGADOR</th><th>BAJAS</th><th>TIEMPO</th></tr></thead>
+            <tbody id="kills-board-body"></tbody>
+          </table>
+        </div>
+        <div class="kills-total">
+          <div class="kills-total-label">TOTAL DE BAJAS DE TODOS LOS JUGADORES</div>
+          <div class="kills-total-sum" id="kills-total-sum"></div>
+          <div class="kills-total-num" id="kills-total-num">0</div>
+        </div>
+        <p class="panel-sub" id="kills-board-best" style="color:#e0b13f;"></p>
+      </div>
       <p class="panel-sub" id="kills-over-wait" style="display:none;">Esperando al Admin para jugar de nuevo...</p>
       <button class="btn btn-primary" data-action="kills-again" id="btn-kills-again">JUGAR DE NUEVO</button>
       <button class="btn btn-secondary" data-action="kills-exit">MENÚ PRINCIPAL</button>

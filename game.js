@@ -418,7 +418,7 @@ function mpCreateRoom() {
         const level = GAME.level;
         if (level) {
           const z = level.zombies.find(zz => zz.id === data.zombieId);
-          if (z) { z.hp -= data.dmg; z.hit = 0.12; }
+          if (z) { z.hp -= data.dmg; z.hit = 0.12; z.lastHit = conn.peer; } // el invitado que lo golpeó
         }
       }
       if (data.type === 'ehit') {
@@ -507,7 +507,7 @@ function mpJoinRoom(code) {
       }
       if (data.type === 'kills-over') {
         const lv = GAME.level;
-        if (lv && lv.stage.objectiveType === 'killStreak') killStreakFinish(lv, data.kills, data.time);
+        if (lv && lv.stage.objectiveType === 'killStreak') killStreakFinish(lv, data.kills, data.time, data.board);
       }
       if (data.type === 'waiting-status') { mpUpdateWaitingUI(data.readyIds); }
       if (data.type === 'colors-taken') { MP.takenColors = data.taken; mpApplyTakenColorsToUI(); }
@@ -535,6 +535,7 @@ function mpJoinRoom(code) {
           level.zombies = mpMergeSmooth(level.zombies, data.list.map(a => ({ id: a[0], x: a[1], y: a[2], angle: a[3] / 100, type: ZT[a[4]], hp: a[5], maxHp: a[6], hit: a[7] ? 0.12 : 0 })));
           GAME.run.kills = data.kills; GAME.run.totalKills = data.totalKills;
           level.killsThisStage = data.killsThisStage;
+          if (data.killsBy) level.killsBy = data.killsBy;
           // Se ven volar las balas enemigas (antes solo las veía el Admin);
           // acá solo se dibujan/mueven, el daño lo sigue resolviendo el Admin.
           if (data.enemyBullets) level.enemyBullets = data.enemyBullets.map(a => ({ x: a[0], y: a[1], vx: a[2], vy: a[3], life: a[4] / 100 }));
@@ -851,7 +852,7 @@ function mpBroadcastMyState(level, dt) {
     const zPayload = {
       type: 'zombies', sid: level.stage.id,
       list: level.zombies.map(z => [z.id, Math.round(z.x), Math.round(z.y), Math.round(z.angle * 100), z.type === 'gunner' ? 1 : z.type === 'rider' ? 2 : 0, Math.round(z.hp), z.maxHp, z.hit > 0 ? 1 : 0]),
-      kills: GAME.run.kills, totalKills: GAME.run.totalKills, killsThisStage: level.killsThisStage,
+      kills: GAME.run.kills, totalKills: GAME.run.totalKills, killsThisStage: level.killsThisStage, killsBy: level.killsBy || null,
       // Balas de zombies/helicópteros/jefe: se mandan para que TODOS vean
       // que le están disparando a quien sea (no solo al Admin). No se manda
       // el targetRef: solo el Admin aplica el daño real (ver updateBullets),
@@ -2400,7 +2401,7 @@ function updateBullets(level, dt) {
       if (z.alive === false) return;
       if (dist(b.x, b.y, z.x, z.y) < 15) {
         z.hit = 0.12; b.life = 0;
-        if (iAmAuthoritative) { z.hp -= b.dmg; }
+        if (iAmAuthoritative) { z.hp -= b.dmg; if (mpIsActive()) z.lastHit = mpMyId(); }
         else if (MP.hostConn) { try { MP.hostConn.send({ type: 'zombie-hit', zombieId: z.id, dmg: b.dmg }); } catch (e) { /* noop */ } }
       }
     });
@@ -2493,6 +2494,12 @@ function updateBullets(level, dt) {
     level.zombies.forEach(z => {
       if (z.alive && z.hp <= 0) {
         z.alive = false; level.killsThisStage++; GAME.run.kills++; GAME.run.totalKills++;
+        // Recolección de bajas (multijugador): la baja es de quien dio el último golpe
+        if (mpIsActive() && level.stage.objectiveType === 'killStreak') {
+          if (!level.killsBy) level.killsBy = {};
+          const who = z.lastHit || 'host';
+          level.killsBy[who] = (level.killsBy[who] || 0) + 1;
+        }
         spawnDeathParticles(level, z.x, z.y);
         setTimeout(() => { if (level === GAME.level && level.subPhase === 'play') spawnZombie(level); }, 2600);
       }
@@ -2558,30 +2565,80 @@ function updateKillStreak(level, dt) {
   level._ksSpawn = (level._ksSpawn || 0) - dt;
   if (level.zombies.length < target && level._ksSpawn <= 0) { level._ksSpawn = 0.6; spawnZombie(level); }
 
+  // Multijugador: se anota cuánto aguantó cada jugador (momento en que cayó)
+  if (mpIsActive() && MP.isHost) {
+    if (!level._deathT) level._deathT = {};
+    if (!level._roster) level._roster = MP.players.map(p => ({ id: p.id, name: p.name }));
+    if (level.dead && level._deathT.host === undefined) level._deathT.host = level.time;
+    MP.conns.forEach(c => { const s = MP.remoteStates[c.peer]; if (s && s.dead && level._deathT[c.peer] === undefined) level._deathT[c.peer] = level.time; });
+  }
+
   // Multijugador: la partida termina cuando cayeron TODOS (el Admin lo decide y avisa al resto)
   if (mpIsActive() && MP.isHost && level.dead) {
     const someoneAlive = MP.conns.some(c => { const s = MP.remoteStates[c.peer]; return !s || !s.dead; });
     if (!someoneAlive) {
-      const kills = level.killsThisStage, time = Math.floor(level.time);
-      MP.conns.forEach(c => { try { c.send({ type: 'kills-over', kills, time }); } catch (e) { /* noop */ } });
-      killStreakFinish(level, kills, time);
+      const time = Math.floor(level.time);
+      const board = killStreakBuildBoard(level, time);
+      const kills = board.reduce((a, r) => a + r.kills, 0);
+      MP.conns.forEach(c => { try { c.send({ type: 'kills-over', kills, time, board }); } catch (e) { /* noop */ } });
+      killStreakFinish(level, kills, time, board);
     }
   }
 }
 
+// Clasificación final (multijugador): una fila por jugador con SUS bajas y cuánto aguantó.
+// Orden: más bajas primero; si empatan, el que aguantó más tiempo.
+function killStreakBuildBoard(level, endTime) {
+  const roster = level._roster || MP.players.map(p => ({ id: p.id, name: p.name }));
+  const rows = roster.map(p => {
+    const t = level._deathT && level._deathT[p.id] !== undefined ? Math.floor(level._deathT[p.id]) : endTime;
+    return { id: p.id, name: p.name || 'Jugador', kills: (level.killsBy && level.killsBy[p.id]) || 0, time: Math.min(t, endTime) };
+  });
+  rows.sort((a, b) => b.kills - a.kills || b.time - a.time);
+  return rows;
+}
+
 // Pantalla de resultados (solitario, Admin e invitados). Guarda el mejor récord del dispositivo.
-function killStreakFinish(level, kills, seconds) {
+function killStreakFinish(level, kills, seconds, board) {
   if (!level || level.subPhase === 'complete') return;
   level.subPhase = 'complete';
   cancelAnimationFrame(GAME.rafId);
   stopBossMusic();
+  const fmt = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  // En multijugador el récord personal se compara con las bajas de ESTE jugador, no las del equipo.
+  const myId = mpMyId();
+  const myKills = board ? ((board.find(r => r.id === myId) || {}).kills || 0) : kills;
   const prev = killStreakBest();
-  const record = kills > prev;
-  if (record) killStreakSaveBest(kills);
-  const mm = Math.floor(seconds / 60), ss = String(seconds % 60).padStart(2, '0');
-  document.getElementById('kills-over-count').textContent = String(kills);
-  document.getElementById('kills-over-time').textContent = `Tiempo sobrevivido: ${mm}:${ss}`;
-  document.getElementById('kills-over-best').textContent = record ? '¡NUEVO RÉCORD!' : `Tu mejor marca: ${prev} bajas`;
+  const record = myKills > prev;
+  if (record) killStreakSaveBest(myKills);
+  const soloBox = document.getElementById('kills-solo-box');
+  const boardBox = document.getElementById('kills-board-box');
+  if (board && board.length) {
+    // ---- clasificación multijugador ----
+    if (soloBox) soloBox.style.display = 'none';
+    if (boardBox) boardBox.style.display = '';
+    const body = document.getElementById('kills-board-body');
+    body.innerHTML = '';
+    board.forEach((r, i) => {
+      const tr = document.createElement('tr');
+      if (r.id === myId) tr.className = 'me';
+      if (i === 0) tr.classList.add('first');
+      const cells = [`${i + 1}°`, r.name + (r.id === myId ? ' (tú)' : ''), String(r.kills), fmt(r.time)];
+      cells.forEach((txt, ci) => { const td = document.createElement('td'); td.textContent = txt; if (ci === 0) td.className = 'rank'; tr.appendChild(td); });
+      body.appendChild(tr);
+    });
+    const total = board.reduce((a, r) => a + r.kills, 0);
+    document.getElementById('kills-total-sum').textContent = board.map(r => r.kills).join(' + ') + ' =';
+    document.getElementById('kills-total-num').textContent = String(total);
+    document.getElementById('kills-board-best').textContent = record ? '¡NUEVO RÉCORD PERSONAL!' : `Tu mejor marca personal: ${prev} bajas`;
+  } else {
+    // ---- solitario ----
+    if (soloBox) soloBox.style.display = '';
+    if (boardBox) boardBox.style.display = 'none';
+    document.getElementById('kills-over-count').textContent = String(kills);
+    document.getElementById('kills-over-time').textContent = `Tiempo sobrevivido: ${fmt(seconds)}`;
+    document.getElementById('kills-over-best').textContent = record ? '¡NUEVO RÉCORD!' : `Tu mejor marca: ${prev} bajas`;
+  }
   const isGuest = mpIsActive() && !MP.isHost;
   document.getElementById('btn-kills-again').style.display = isGuest ? 'none' : '';
   document.getElementById('kills-over-wait').style.display = isGuest ? '' : 'none';
@@ -4003,8 +4060,15 @@ function updateHUD(level) {
   if (level.stage.objectiveType === 'killStreak') {
     if (level._best === undefined) level._best = killStreakBest();
     const secs = Math.floor(level.time), mm = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, '0');
-    document.getElementById('hud-objective').textContent =
-      `RECOLECCIÓN DE BAJAS — Bajas: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Mejor: ${Math.max(level._best, level.killsThisStage)}`;
+    if (mpIsActive()) {
+      const mine = (level.killsBy && level.killsBy[mpMyId()]) || 0;
+      level._mineKills = mine;
+      document.getElementById('hud-objective').textContent =
+        `RECOLECCIÓN DE BAJAS — Tus bajas: ${mine}  ·  Equipo: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Tu mejor: ${Math.max(level._best, mine)}`;
+    } else {
+      document.getElementById('hud-objective').textContent =
+        `RECOLECCIÓN DE BAJAS — Bajas: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Mejor: ${Math.max(level._best, level.killsThisStage)}`;
+    }
   } else if (level.stage.objectiveType === 'survive') {
     const pct = Math.min(100, Math.round(level.killsThisStage / level.stage.surviveKillTarget * 100));
     document.getElementById('hud-objective').textContent = level.killsThisStage >= level.stage.surviveKillTarget

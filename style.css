@@ -571,3 +571,23 @@ html,body{
 
 /* Frase del zombie con lentes al aceptar el desafío */
 .challenge-quote{ font-size:1.2rem; opacity:1; color:#ff8a8a; text-shadow:0 0 12px rgba(209,39,45,0.6); line-height:1.5; margin: 6px 0 4px; }
+
+/* Estado del modo sin internet (menú principal) */
+.offline-status{ font-size:0.7rem; letter-spacing:1px; margin:10px auto 0; max-width:340px; text-align:center; opacity:0.85; min-height:1.2em; color: var(--bone); }
+.offline-status.ok{ color:#9dfb4c; }
+.offline-status.warn{ color:#ffb347; }
+
+/* Recolección de bajas: clasificación multijugador */
+.kills-board-scroll{ max-height:38vh; overflow-y:auto; margin:6px 0 10px; }
+.kills-board{ width:100%; border-collapse:collapse; font-size:0.9rem; }
+.kills-board th{ font-family: var(--font-display); letter-spacing:1.5px; font-weight:400; font-size:0.72rem; color:var(--bone); opacity:0.7; text-align:center; padding:4px 8px; border-bottom:1px solid var(--blood-dim); }
+.kills-board td{ text-align:center; padding:7px 8px; border-bottom:1px solid rgba(255,255,255,0.06); color:var(--bone); }
+.kills-board td:nth-child(2){ text-align:left; }
+.kills-board td.rank{ font-family: var(--font-display); font-size:1.05rem; }
+.kills-board tr.first td{ color:#e0b13f; font-weight:700; }
+.kills-board tr.first td.rank{ text-shadow:0 0 10px rgba(224,177,63,0.6); }
+.kills-board tr.me{ background:rgba(157,251,76,0.10); }
+.kills-total{ border:1px solid var(--blood-dim); background:rgba(10,14,9,0.6); padding:10px 14px; text-align:center; margin-bottom:8px; }
+.kills-total-label{ font-size:0.7rem; letter-spacing:1.5px; color:var(--bone); opacity:0.8; }
+.kills-total-sum{ font-size:0.85rem; color:var(--bone); opacity:0.75; margin-top:4px; }
+.kills-total-num{ font-family:'Anton',sans-serif; font-size:2.6rem; color:#9dfb4c; line-height:1.1; }
