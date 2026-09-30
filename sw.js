@@ -5,11 +5,12 @@
  *
  * Si agregas archivos nuevos al juego (música, imágenes), añádelos a CORE y sube CACHE_VERSION.
  */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE = 'extincion-zombie-' + CACHE_VERSION;
 const CORE = [
   './', 'index.html', 'game.js', 'style.css', 'favicon.svg',
   'Menu.mp3', 'Avion.mp3', 'Music_robot.mp3', 'mementomori.jpeg', 'yo.jpeg',
+  'manifest.json', 'icon-192.png', 'icon-512.png', 'icon-512-maskable.png',
 ];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
