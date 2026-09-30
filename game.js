@@ -556,7 +556,7 @@ function mpJoinRoom(code) {
             mpFreshSelection();
           }
         }
-        buildCharacterGrid(); showScreen('screen-character');
+        GAME.charBack = null; buildCharacterGrid(); showScreen('screen-character');
       }
       if (data.type === 'friend-over') { mpFriendGameOver(); }
       if (data.type === 'chaos-over') { mpChaosGameOver(data.who); }
@@ -739,6 +739,7 @@ function mpBeginSelectionForAll() {
   MP.remoteStates = {};
   MP.conns.forEach(c => { try { c.send({ type: 'begin-selection', stageIndex: GAME.phaseSkip ? GAME.stageIndex : 0, killDiff: killDiffKey(), roomMode: roomModeKey() }); } catch (e) { /* noop */ } });
   if (!GAME.phaseSkip) { GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 }; }
+  GAME.charBack = null;
   buildCharacterGrid();
   showScreen('screen-character');
 }
@@ -1242,6 +1243,11 @@ function showScreen(id) {
   document.getElementById(id).classList.add('active');
   GAME.screen = id;
   if (id === 'screen-menu') startMenuMusic(); else stopMenuMusic();
+  // Botones VOLVER de la selección: solo aparecen si hay una pantalla anterior a la que regresar
+  const setBack = (btnId, visible) => { const b = document.getElementById(btnId); if (b) b.style.display = visible ? '' : 'none'; };
+  if (id === 'screen-character') setBack('btn-char-back', !!GAME.charBack);
+  if (id === 'screen-vehicle') setBack('btn-vehicle-back', !!GAME.vehBack);
+  if (id === 'screen-weapons') setBack('btn-weapons-back', !!GAME.weaponsBack);
 }
 
 function bindMenuActions() {
@@ -1262,7 +1268,7 @@ function handleAction(action, btn) {
     case 'room-mode':
       if (btn && ROOM_MODES[btn.dataset.mode]) { MP.mode = btn.dataset.mode; updateRoomModeUI(); }
       break;
-    case 'goto-character': buildCharacterGrid(); showScreen('screen-character'); break;
+    case 'goto-character': GAME.charBack = 'screen-mode-select'; buildCharacterGrid(); showScreen('screen-character'); break;
     case 'goto-settings': showScreen('screen-settings'); break;
     case 'goto-controls': showScreen('screen-controls'); break;
     case 'goto-credits': showScreen('screen-credits'); break;
@@ -1316,16 +1322,29 @@ function handleAction(action, btn) {
         showScreen('screen-mode-select');
         break;
       }
+      GAME.charBack = 'screen-phase-select';
       buildCharacterGrid();
       showScreen('screen-character');
       break;
+    case 'back-character':
+      if (GAME.charBack) { if (GAME.charBack === 'screen-mode-select') updateKillsDiffUI(); showScreen(GAME.charBack); }
+      break;
+    case 'back-vehicle':
+      GAME.phaseSkip = !!GAME.skipEntry; // se deshace lo que hizo CONTINUAR, para poder volver a avanzar
+      showScreen('screen-character');
+      break;
+    case 'back-weapons':
+      if (GAME.weaponsBack === 'screen-character') GAME.phaseSkip = !!GAME.skipEntry;
+      if (GAME.weaponsBack) showScreen(GAME.weaponsBack);
+      break;
     case 'back-menu': GAME.phaseSkip = false; showScreen('screen-menu'); break;
     case 'goto-vehicle':
+      GAME.skipEntry = GAME.phaseSkip; GAME.vehBack = true;
       if (!GAME.phaseSkip) { GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 }; }
       GAME.phaseSkip = false;
       openVehicleSelectForCurrentStage();
       break;
-    case 'vehicle-next': afterVehicleSelected(); break;
+    case 'vehicle-next': GAME.weaponsBack = 'screen-vehicle'; afterVehicleSelected(); break;
     case 'start-stage':
       if (mpIsActive()) mpMarkReady(); else beginStageIntro();
       break;
@@ -1447,6 +1466,7 @@ function openVehicleSelectForCurrentStage() {
   if (stage.onFoot) {
     if (stage.companionSelect) { buildCompanionGrid(); showScreen('screen-vehicle'); return; }
     GAME.selection.companion = null; // etapas a pie sin compañero (Recolección de bajas)
+    GAME.weaponsBack = GAME.vehBack ? 'screen-character' : null; // no hubo pantalla de montura: se vuelve al personaje
     afterVehicleSelected();
     return;
   }
@@ -3536,6 +3556,7 @@ function advanceStage() {
   const isLast = !nextStage || nextStage.hidden; // la batalla definitiva no es una etapa "siguiente" normal
   if (isLast) { return; } // el final se gestiona vía la poción
   GAME.stageIndex++;
+  GAME.vehBack = false; // en las etapas siguientes no hay selección de personaje a la que volver
   openVehicleSelectForCurrentStage();
 }
 

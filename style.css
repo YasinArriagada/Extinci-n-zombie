@@ -165,6 +165,9 @@ html,body{
 .btn-danger:hover{ border-color: var(--blood); box-shadow: 0 0 16px rgba(209,39,45,0.4); }
 .btn-secondary{ font-size:0.8rem; padding:12px 34px; }
 .btn-next{ margin-top: 30px; }
+/* Fila de navegación de las pantallas de selección: VOLVER a la izquierda, CONTINUAR a la derecha */
+.btn-row{ display:flex; gap:14px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:30px; }
+.btn-row .btn{ margin-top:0; }
 
 .corner-tag{
   position:absolute; bottom:-70px; left:50%; transform:translateX(-50%);
