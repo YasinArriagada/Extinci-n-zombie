@@ -1245,7 +1245,7 @@ function showScreen(id) {
   if (id === 'screen-menu') startMenuMusic(); else stopMenuMusic();
   // Botones VOLVER de la selección: solo aparecen si hay una pantalla anterior a la que regresar
   const setBack = (btnId, visible) => { const b = document.getElementById(btnId); if (b) b.style.display = visible ? '' : 'none'; };
-  if (id === 'screen-character') setBack('btn-char-back', !!GAME.charBack);
+  if (id === 'screen-character') setBack('btn-char-back', true); // ATRÁS siempre disponible (también en multijugador)
   if (id === 'screen-vehicle') setBack('btn-vehicle-back', !!GAME.vehBack);
   if (id === 'screen-weapons') setBack('btn-weapons-back', !!GAME.weaponsBack);
 }
@@ -1327,7 +1327,8 @@ function handleAction(action, btn) {
       showScreen('screen-character');
       break;
     case 'back-character':
-      GAME.phaseSkip = false; showScreen('screen-menu'); // ATRÁS: vuelve directo al menú de inicio
+      // ATRÁS: vuelve directo al menú de inicio; en multijugador además sale de la sala
+      if (mpIsActive()) mpLeaveRoom(); else { GAME.phaseSkip = false; showScreen('screen-menu'); }
       break;
     case 'back-vehicle':
       GAME.phaseSkip = !!GAME.skipEntry; // se deshace lo que hizo CONTINUAR, para poder volver a avanzar
