@@ -912,15 +912,19 @@ function mpFriendCheck() {
   mpHostTryAdvance();
 }
 
-// Fin del juego en Modo amistad (todos cayeron): pantalla para todos, sin reintentar la etapa.
+// Fin del juego en Modo amistad (todos cayeron): pantalla para todos. Igual que en el Modo caos, solo el
+// Admin puede reiniciar la partida (desde la etapa 1 para todos); los invitados esperan o salen de la sala.
 function mpFriendGameOver() {
   const lv = GAME.level;
   if (lv) { if (lv._friendOver) return; lv._friendOver = true; lv.subPhase = 'complete'; }
   cancelAnimationFrame(GAME.rafId);
   stopBossMusic();
+  const overlay = document.getElementById('hud-dead-overlay');
+  if (overlay) overlay.classList.remove('show');
   document.getElementById('stage-fail-title').textContent = 'FIN DEL JUEGO';
-  document.getElementById('stage-fail-sub').textContent = 'MODO AMISTAD: todos los jugadores cayeron. La partida terminó.';
-  stageFailButtons(true);
+  document.getElementById('stage-fail-sub').textContent = 'MODO AMISTAD: todos los jugadores cayeron. ' +
+    (MP.isHost ? 'Si vuelven a jugar, empezarán desde la etapa 1.' : 'Esperando a que el Admin reinicie la partida desde la etapa 1...');
+  stageFailButtons('chaos'); // mismos botones que el Modo caos: VOLVER A JUGAR (ETAPA 1) solo para el Admin
   showScreen('screen-stage-fail');
 }
 
@@ -962,7 +966,7 @@ function mpFreshSelection() {
 }
 
 // Botones de la pantalla de fracaso: normal (reintentar / menú), fin del Modo amistad (solo salir de la sala)
-// o fin del Modo caos (el Admin puede volver a jugar desde la etapa 1; los invitados esperan o salen).
+// o fin del Modo caos / Modo amistad (el Admin puede volver a jugar desde la etapa 1; los invitados esperan o salen).
 function stageFailButtons(kind) {
   const friendOver = kind === true || kind === 'friend';
   const chaos = kind === 'chaos';
