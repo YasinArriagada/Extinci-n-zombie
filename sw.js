@@ -4,8 +4,9 @@
  * internet (lo comprueba game.js).
  *
  * Si agregas archivos nuevos al juego (música, imágenes), añádelos a CORE y sube CACHE_VERSION.
+ * El código (html, js, css, json) y las imágenes se actualizan solos al abrir el juego con internet.
  */
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const CACHE = 'extincion-zombie-' + CACHE_VERSION;
 const CORE = [
   './', 'index.html', 'game.js', 'style.css', 'favicon.svg',
@@ -13,6 +14,15 @@ const CORE = [
   'manifest.json', 'icon-192 (1).png', 'icon-512 (1).png', 'icon-512-maskable.png',
 ];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
+
+// Pide SIEMPRE la versión más nueva al servidor (revalida, no usa copias viejas del navegador).
+// Si la conexión está muy lenta y no responde a tiempo, se usa la copia guardada.
+async function fetchFresh(url, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(new Request(url, { cache: 'no-cache', signal: ctrl.signal })); }
+  finally { clearTimeout(t); }
+}
 
 // La caché se guarda SIN el "?v=..." que index.html agrega para evitar versiones viejas.
 const keyFor = url => new Request(url.origin + url.pathname);
@@ -93,7 +103,7 @@ self.addEventListener('fetch', e => {
     if (isCode) {
       // Con internet: siempre la versión más nueva. Sin internet: la guardada.
       try {
-        const res = await fetch(req);
+        const res = await fetchFresh(req.url, 6000);
         if (res && res.ok) cache.put(key, res.clone());
         return res;
       } catch (err) {
@@ -105,7 +115,10 @@ self.addEventListener('fetch', e => {
 
     // Imágenes y demás: de la caché si existe; si no, de internet y se guarda.
     const hit = await cache.match(key);
-    if (hit) return hit;
+    if (hit) {
+      e.waitUntil(fetch(req).then(r => { if (r && r.ok) return cache.put(key, r.clone()); }).catch(() => {}));
+      return hit;
+    }
     const res = await fetch(req);
     if (res && res.ok) cache.put(key, res.clone());
     return res;

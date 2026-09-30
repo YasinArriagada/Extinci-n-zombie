@@ -487,7 +487,13 @@
   // la primera vez que se abre con conexión. (PeerJS, solo para multijugador, se carga
   // desde game.js únicamente cuando se entra al multijugador.)
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+        // busca versión nueva del juego al abrirlo y cada vez que vuelves a la app
+        reg.update().catch(function () {});
+        document.addEventListener('visibilitychange', function () { if (!document.hidden) reg.update().catch(function () {}); });
+      }).catch(function () {});
+    });
   }
 </script>
 
