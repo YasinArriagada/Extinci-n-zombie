@@ -256,6 +256,46 @@ function mpMyId() { return MP.isHost ? 'host' : (MP.peer ? MP.peer.id : null); }
 
 function mpIsActive() { return !!MP.peer; }
 
+/* ---- Internet: el modo solitario funciona sin conexión; el multijugador la necesita ---- */
+const PEERJS_URL = 'https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js';
+const MP_MSG_OFFLINE = 'El multijugador necesita conexión a internet. Puedes jugar en solitario sin conexión.';
+const MP_MSG_NOLIB = 'No se pudo conectar con el servicio multijugador. Revisa tu conexión a internet e inténtalo de nuevo.';
+const MP_MSG_LOST = 'Se perdió la conexión a internet. El multijugador la necesita para funcionar.';
+
+function mpIsOnline() { return navigator.onLine !== false; }
+
+// PeerJS se descarga solo cuando hace falta (así el juego en solitario nunca depende de internet).
+let _peerLibLoading = null;
+function mpEnsurePeerLib() {
+  if (typeof Peer !== 'undefined') return Promise.resolve(true);
+  if (_peerLibLoading) return _peerLibLoading;
+  _peerLibLoading = new Promise(resolve => {
+    const sc = document.createElement('script');
+    let done = false;
+    const finish = ok => { if (done) return; done = true; if (!ok) sc.remove(); resolve(ok); };
+    sc.src = PEERJS_URL;
+    sc.onload = () => finish(typeof Peer !== 'undefined');
+    sc.onerror = () => finish(false);
+    setTimeout(() => finish(typeof Peer !== 'undefined'), 12000);
+    document.head.appendChild(sc);
+  }).then(ok => { _peerLibLoading = null; return ok; });
+  return _peerLibLoading;
+}
+
+// Devuelve '' si se puede jugar en línea, o el mensaje de error a mostrar.
+async function mpCheckOnline() {
+  if (!mpIsOnline()) return MP_MSG_OFFLINE;
+  const ok = await mpEnsurePeerLib();
+  return ok ? '' : (mpIsOnline() ? MP_MSG_NOLIB : MP_MSG_OFFLINE);
+}
+
+function mpErrText(err) {
+  const t = err && err.type;
+  if (t === 'peer-unavailable') return 'No existe ninguna sala con ese código.';
+  if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed' || !mpIsOnline()) return MP_MSG_OFFLINE;
+  return 'Error de conexión: ' + t;
+}
+
 // Control de congestión: el estado se manda completo ~20 veces por segundo, así que
 // si la conexión de un teléfono está saturada se salta ese envío (el siguiente trae
 // el estado más nuevo). Sin esto los mensajes se acumulaban y ese jugador veía la
@@ -290,8 +330,14 @@ function mpUpdateLobbyUI() {
   }
   const codeEl = document.getElementById('mp-room-code');
   if (codeEl) codeEl.textContent = MP.code || '—';
+  // Solo el Admin ve el botón, y solo se activa con 2 jugadores o más en la sala.
   const startBtn = document.getElementById('btn-mp-start');
-  if (startBtn) startBtn.style.display = MP.isHost ? '' : 'none';
+  const enough = MP.players.length >= 2;
+  if (startBtn) { startBtn.style.display = MP.isHost ? '' : 'none'; startBtn.disabled = !(MP.isHost && enough); }
+  const hintEl = document.getElementById('mp-start-hint');
+  if (hintEl) hintEl.textContent = MP.isHost
+    ? (enough ? 'Todo listo. Presiona INICIAR PARTIDA cuando quieras.' : 'Necesitas al menos 2 jugadores para iniciar la partida.')
+    : 'Esperando a que el Admin inicie la partida...';
   const statusEl = document.getElementById('mp-status');
   if (statusEl) statusEl.textContent = `${MP.players.length} / 5 jugadores conectados`;
 }
@@ -308,6 +354,7 @@ function mpCreateRoom() {
   MP.myName = mpGetName();
   MP.players = [{ id: 'host', name: MP.myName, isHost: true }];
   showScreen('screen-mp-lobby');
+  mpUpdateLobbyUI();
   document.getElementById('mp-status').textContent = 'Creando sala...';
   MP.peer = new Peer(MP_PREFIX + MP.code);
   MP.peer.on('open', () => { mpUpdateLobbyUI(); });
@@ -410,7 +457,7 @@ function mpCreateRoom() {
       mpBroadcastPlayerList();
     });
   });
-  MP.peer.on('error', err => { mpShowJoinError('Error de conexión: ' + err.type); });
+  MP.peer.on('error', err => { mpShowJoinError(mpErrText(err)); });
 }
 
 function mpJoinRoom(code) {
@@ -535,7 +582,7 @@ function mpJoinRoom(code) {
     conn.on('error', () => { mpShowJoinError('No se pudo conectar. Revisá el código.'); mpLeaveRoom(); });
   });
   MP.peer.on('error', err => {
-    mpShowJoinError(err.type === 'peer-unavailable' ? 'No existe ninguna sala con ese código.' : ('Error de conexión: ' + err.type));
+    mpShowJoinError(mpErrText(err));
     mpLeaveRoom();
   });
 }
@@ -556,6 +603,17 @@ function mpLeaveRoom() {
   mpResetState();
   showScreen('screen-menu');
 }
+
+// Si el internet se cae y sigue caído unos segundos en pleno multijugador, se sale de
+// la sala con un aviso (una microcaída de un par de segundos no expulsa a nadie).
+window.addEventListener('offline', () => {
+  if (!mpIsActive()) return;
+  clearTimeout(MP._offlineT);
+  MP._offlineT = setTimeout(() => {
+    if (mpIsActive() && !mpIsOnline()) { fullReset(); mpResetState(); mpShowJoinError(MP_MSG_LOST); }
+  }, 4000);
+});
+window.addEventListener('online', () => clearTimeout(MP._offlineT));
 
 /* --- Colores de montura: el host arbitra quién eligió cada color --- */
 
@@ -1014,22 +1072,39 @@ function handleAction(action) {
     case 'goto-controls': showScreen('screen-controls'); break;
     case 'goto-credits': showScreen('screen-credits'); break;
     case 'goto-mode-select': showScreen('screen-mode-select'); break;
-    case 'goto-mp-join': document.getElementById('mp-join-error').textContent = ''; showScreen('screen-mp-join'); break;
+    case 'goto-mp-join': {
+      const modeErr = document.getElementById('mode-select-error');
+      if (!mpIsOnline()) { if (modeErr) modeErr.textContent = MP_MSG_OFFLINE; break; } // sin internet no se entra
+      if (modeErr) modeErr.textContent = '';
+      document.getElementById('mp-join-error').textContent = '';
+      showScreen('screen-mp-join');
+      mpEnsurePeerLib(); // se va descargando mientras el jugador escribe su nombre
+      break;
+    }
     case 'mp-create':
       if (!document.getElementById('mp-name-input').value.trim()) { document.getElementById('mp-join-error').textContent = 'Escribí tu nombre antes de crear la sala.'; break; }
-      mpCreateRoom();
+      document.getElementById('mp-join-error').textContent = 'Comprobando conexión...';
+      mpCheckOnline().then(msg => {
+        document.getElementById('mp-join-error').textContent = msg;
+        if (!msg) mpCreateRoom();
+      });
       break;
     case 'mp-join': {
       if (!document.getElementById('mp-name-input').value.trim()) { document.getElementById('mp-join-error').textContent = 'Escribí tu nombre antes de unirte.'; break; }
       const code = document.getElementById('mp-code-input').value.trim();
       if (!code) { document.getElementById('mp-join-error').textContent = 'Ingresá un código de sala.'; break; }
-      mpJoinRoom(code);
+      document.getElementById('mp-join-error').textContent = 'Comprobando conexión...';
+      mpCheckOnline().then(msg => {
+        document.getElementById('mp-join-error').textContent = msg;
+        if (!msg) mpJoinRoom(code);
+      });
       break;
     }
     case 'mp-leave': mpLeaveRoom(); break;
     case 'revive-player': reviveLocalPlayer(GAME.level); break;
     case 'mp-start':
-      if (MP.isHost) mpBeginSelectionForAll();
+      // solo el Admin, y solo con 2 jugadores o más en la sala
+      if (MP.isHost && MP.players.length >= 2) mpBeginSelectionForAll();
       break;
     case 'goto-phase-select': buildPhaseGrid(); showScreen('screen-phase-select'); break;
     case 'phase-select-continue':

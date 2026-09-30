@@ -7,7 +7,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <script>
   // Genera automáticamente una versión nueva en cada carga de página, así el
   // navegador nunca sirve una copia vieja en caché de style.css.
@@ -124,6 +124,7 @@
         <button class="btn btn-primary" data-action="goto-character">SOLITARIO</button>
         <button class="btn btn-secondary" data-action="goto-mp-join">MULTIJUGADOR</button>
       </nav>
+      <p class="mp-error" id="mode-select-error"></p>
       <button class="btn btn-secondary mode-select-back" data-action="back-menu">VOLVER</button>
     </div>
   </section>
@@ -156,7 +157,8 @@
       <p class="panel-sub">Código de sala: <span id="mp-room-code">—</span></p>
       <p class="panel-sub" id="mp-status">Conectando...</p>
       <div class="mp-player-list" id="mp-player-list"></div>
-      <button class="btn btn-primary" data-action="mp-start" id="btn-mp-start">INICIAR PARTIDA</button>
+      <p class="panel-sub" id="mp-start-hint"></p>
+      <button class="btn btn-primary" data-action="mp-start" id="btn-mp-start" style="display:none" disabled>INICIAR PARTIDA</button>
       <button class="btn btn-secondary" data-action="mp-leave">SALIR DE LA SALA</button>
     </div>
   </section>
@@ -436,7 +438,14 @@
 
 </div>
 
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script>
+  // Modo solitario sin internet: el service worker guarda el juego en el dispositivo
+  // la primera vez que se abre con conexión. (PeerJS, solo para multijugador, se carga
+  // desde game.js únicamente cuando se entra al multijugador.)
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  }
+</script>
 
 <script>
   // Mismo truco para game.js: versión automática con la hora exacta, pero
