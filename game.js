@@ -271,13 +271,25 @@ const MP = {
 // MODOS DE SALA (multijugador). El Admin elige uno en MULTIJUGADOR, debajo de CREAR SALA; el modo
 // viaja a todos los invitados (lista de jugadores y comienzo de la selección) y se muestra en la
 // sala de espera. Cualquier parte del juego puede consultarlo con roomModeKey().
-// Por ahora solo se elige y se muestra: los efectos de cada modo se definen aquí.
+// MODO AMISTAD (efecto): quien cae NO puede revivir; mira a sus compañeros como espectador durante
+// el resto de la fase y vuelve a jugar en la siguiente. Si caen TODOS, se acaba el juego.
+// MODO CAOS (efecto): si cae UN solo jugador, todos pierden y hay que reiniciar desde la etapa 1.
 const ROOM_MODES = {
   friendship: { label: 'MODO AMISTAD' },
   chaos:      { label: 'MODO CAOS' },
   normal:     { label: 'MODO NORMAL' },
 };
 function roomModeKey() { return ROOM_MODES[MP.mode] ? MP.mode : 'normal'; }
+// true solo en una sala multijugador en curso con el Modo amistad elegido
+function mpFriendMode() { return !!MP.peer && roomModeKey() === 'friendship'; }
+// true solo en una sala multijugador en curso con el Modo caos elegido.
+// MODO CAOS (efecto): si UN jugador cae, TODOS pierden al instante. Para volver a jugar hay que
+// empezar de nuevo desde la etapa 1 (solo el Admin puede reiniciar la partida para todos).
+function mpChaosMode() { return !!MP.peer && roomModeKey() === 'chaos'; }
+// ¿este jugador (ya eliminado) no puede volver a jugar en esta fase?
+function mpNoRevive(level) { return !!level && (level.stage.objectiveType === 'killStreak' || mpFriendMode() || mpChaosMode()); }
+// ¿está en modo espectador (eliminado, sin revivir, en multijugador)?
+function mpSpectating(level) { return !!level && level.dead && !!MP.peer && mpNoRevive(level); }
 function updateRoomModeUI() {
   const cur = roomModeKey();
   document.querySelectorAll('.room-mode-btn').forEach(b => b.classList.toggle('selected', b.dataset.mode === cur));
@@ -418,6 +430,7 @@ function mpCreateRoom() {
         // copia limpia ANTES de mpStoreRemote (que consume los disparos y agrega campos internos)
         const relay = { ...data };
         mpStoreRemote(data);
+        if (data.dead) { mpFriendCheck(); mpChaosCheck(); } // Modo amistad: ¿cayeron todos? · Modo caos: ¿cayó alguien?
         if (!MP._peerRelay) MP._peerRelay = {};
         const prevRelay = MP._peerRelay[relay.id];
         if (prevRelay && prevRelay.shots) relay.shots = relay.shots ? prevRelay.shots.concat(relay.shots) : prevRelay.shots;
@@ -489,6 +502,7 @@ function mpCreateRoom() {
       delete MP.remoteStates[conn.peer];
       if (MP._peerRelay) delete MP._peerRelay[conn.peer];
       mpBroadcastPlayerList();
+      mpFriendCheck();
     });
   });
   MP.peer.on('error', err => { mpShowJoinError(mpErrText(err)); });
@@ -523,9 +537,16 @@ function mpJoinRoom(code) {
         // el Admin puede arrancar en otra etapa (modo especial "Recolección de bajas")
         if (typeof data.stageIndex === 'number' && data.stageIndex > 0 && STAGES[data.stageIndex]) {
           GAME.phaseSkip = true; GAME.stageIndex = data.stageIndex; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
-        } else GAME.phaseSkip = false;
+        } else {
+          // partida normal (o reinicio del Modo caos): siempre desde la etapa 1 y con la selección limpia
+          GAME.phaseSkip = false; GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
+          GAME.paused = false; MP.remoteStates = {}; MP._doneIds = [];
+          mpFreshSelection();
+        }
         buildCharacterGrid(); showScreen('screen-character');
       }
+      if (data.type === 'friend-over') { mpFriendGameOver(); }
+      if (data.type === 'chaos-over') { mpChaosGameOver(data.who); }
       if (data.type === 'kills-over') {
         const lv = GAME.level;
         if (lv && lv.stage.objectiveType === 'killStreak') killStreakFinish(lv, data.kills, data.time, data.board);
@@ -785,14 +806,119 @@ function mpHostReceiveStageDone(playerId) {
   const doneIds = Object.keys(MP.stageDone);
   MP.conns.forEach(c => { try { c.send({ type: 'stage-progress', doneIds }); } catch (e) { /* noop */ } });
   mpUpdateStageWaitUI(doneIds);
-  if (doneIds.length === MP.players.length) {
-    MP.stageDone = {};
-    MP.conns.forEach(c => { try { c.send({ type: 'advance-stage' }); } catch (e) { /* noop */ } });
-    advanceStage();
+  mpHostTryAdvance();
+}
+
+// ¿este jugador está eliminado ahora mismo? (el Admin lo sabe por el estado que envía cada invitado)
+function mpPlayerIsDead(id) {
+  if (id === 'host') return !!(GAME.level && GAME.level.dead);
+  const s = MP.remoteStates[id];
+  return !!(s && s.dead);
+}
+
+// Solo el Admin. La fase avanza cuando todos llegaron a la zona segura; en Modo amistad los
+// jugadores eliminados no cuentan (miran la fase y vuelven a jugar en la siguiente), pero tiene
+// que haber llegado al menos uno.
+function mpHostTryAdvance() {
+  const ids = MP.players.map(p => (p.isHost ? 'host' : p.id));
+  const doneIds = Object.keys(MP.stageDone);
+  const ready = mpFriendMode()
+    ? doneIds.length > 0 && ids.every(id => MP.stageDone[id] || mpPlayerIsDead(id))
+    : doneIds.length === MP.players.length;
+  if (!ready) return;
+  MP.stageDone = {};
+  MP.conns.forEach(c => { try { c.send({ type: 'advance-stage' }); } catch (e) { /* noop */ } });
+  advanceStage();
+}
+
+// Solo el Admin, en Modo amistad: si cayeron TODOS se acaba el juego; si no, comprueba si los que
+// siguen vivos ya terminaron la fase. Se llama cuando alguien cae o se desconecta.
+function mpFriendCheck() {
+  if (!mpFriendMode() || !MP.isHost) return;
+  const level = GAME.level;
+  if (!level || level._friendOver) return;
+  // (Recolección de bajas ya termina sola cuando cae el último jugador, ver updateKillStreak)
+  if (level.stage.objectiveType !== 'killStreak' && GAME.screen === 'screen-game' && level.dead) {
+    const ids = MP.players.map(p => (p.isHost ? 'host' : p.id));
+    if (ids.every(id => mpPlayerIsDead(id))) {
+      MP.conns.forEach(c => { try { c.send({ type: 'friend-over' }); } catch (e) { /* noop */ } });
+      mpFriendGameOver();
+      return;
+    }
+  }
+  mpHostTryAdvance();
+}
+
+// Fin del juego en Modo amistad (todos cayeron): pantalla para todos, sin reintentar la etapa.
+function mpFriendGameOver() {
+  const lv = GAME.level;
+  if (lv) { if (lv._friendOver) return; lv._friendOver = true; lv.subPhase = 'complete'; }
+  cancelAnimationFrame(GAME.rafId);
+  stopBossMusic();
+  document.getElementById('stage-fail-title').textContent = 'FIN DEL JUEGO';
+  document.getElementById('stage-fail-sub').textContent = 'MODO AMISTAD: todos los jugadores cayeron. La partida terminó.';
+  stageFailButtons(true);
+  showScreen('screen-stage-fail');
+}
+
+// Solo el Admin, en Modo caos: si cualquier jugador cayó, TODOS pierden. Se llama cuando alguien cae.
+function mpChaosCheck() {
+  if (!mpChaosMode() || !MP.isHost) return;
+  const level = GAME.level;
+  if (!level || level._chaosOver) return;
+  if (level.stage.objectiveType === 'killStreak') return; // esa fase termina sola en updateKillStreak (con su tabla de bajas)
+  const ids = MP.players.map(p => (p.isHost ? 'host' : p.id));
+  const fallenId = ids.find(id => mpPlayerIsDead(id));
+  if (fallenId === undefined) return;
+  const fallen = MP.players.find(p => (p.isHost ? 'host' : p.id) === fallenId);
+  const who = fallen ? fallen.name : '';
+  MP.conns.forEach(c => { try { c.send({ type: 'chaos-over', who }); } catch (e) { /* noop */ } });
+  mpChaosGameOver(who);
+}
+
+// Fin del juego en Modo caos: pantalla de derrota para todos. Solo el Admin puede reiniciar (desde la etapa 1).
+function mpChaosGameOver(who) {
+  const lv = GAME.level;
+  if (lv) { if (lv._chaosOver) return; lv._chaosOver = true; lv.subPhase = 'complete'; }
+  cancelAnimationFrame(GAME.rafId);
+  stopBossMusic();
+  const overlay = document.getElementById('hud-dead-overlay');
+  if (overlay) overlay.classList.remove('show');
+  document.getElementById('stage-fail-title').textContent = 'FIN DEL JUEGO';
+  document.getElementById('stage-fail-sub').textContent = 'MODO CAOS: ' + (who || 'un jugador') + ' cayó y todos pierden. ' +
+    (MP.isHost ? 'Si vuelven a jugar, empezarán desde la etapa 1.' : 'Esperando a que el Admin reinicie la partida desde la etapa 1...');
+  stageFailButtons('chaos');
+  showScreen('screen-stage-fail');
+}
+
+// Deja la selección de personaje/vehículo en blanco (nueva partida desde la etapa 1).
+function mpFreshSelection() {
+  GAME.selection = { character: null, vehicle: null, weapons: [], companion: null };
+  const b = document.getElementById('btn-char-next');
+  if (b) b.disabled = true;
+}
+
+// Botones de la pantalla de fracaso: normal (reintentar / menú), fin del Modo amistad (solo salir de la sala)
+// o fin del Modo caos (el Admin puede volver a jugar desde la etapa 1; los invitados esperan o salen).
+function stageFailButtons(kind) {
+  const friendOver = kind === true || kind === 'friend';
+  const chaos = kind === 'chaos';
+  const retry = document.getElementById('btn-stage-retry');
+  const menu = document.getElementById('btn-stage-menu');
+  if (retry) {
+    retry.style.display = friendOver || (chaos && !MP.isHost) ? 'none' : '';
+    retry.dataset.action = chaos ? 'chaos-again' : 'restart-stage';
+    retry.textContent = chaos ? 'VOLVER A JUGAR (ETAPA 1)' : 'REINTENTAR ETAPA';
+  }
+  if (menu) {
+    const leave = friendOver || chaos;
+    menu.dataset.action = leave ? 'kills-exit' : 'quit-menu'; // kills-exit: reinicia y sale de la sala
+    menu.textContent = leave ? 'SALIR DE LA SALA' : 'MENÚ PRINCIPAL';
   }
 }
 
 function mpUpdateStageWaitUI(doneIds) {
+  MP._doneIds = doneIds || []; // los espectadores dejan de seguir a quien ya terminó la fase
   const list = document.getElementById('mp-stage-wait-list');
   if (!list) return;
   list.innerHTML = '';
@@ -801,7 +927,7 @@ function mpUpdateStageWaitUI(doneIds) {
     const isDone = doneIds.includes(id);
     const row = document.createElement('div');
     row.className = 'mp-player-row' + (isDone ? ' is-host' : '');
-    row.textContent = p.name + (p.isHost ? ' — Admin' : '') + (isDone ? ' ✔ en zona segura' : ' — jugando...');
+    row.textContent = p.name + (p.isHost ? ' — Admin' : '') + (isDone ? ' ✔ en zona segura' : (mpFriendMode() && mpPlayerIsDead(id)) ? ' ☠ eliminado — espectador' : ' — jugando...');
     list.appendChild(row);
   });
 }
@@ -1191,7 +1317,12 @@ function handleAction(action, btn) {
       break;
     case 'stage-intro-continue': startStageGameplay(); break;
     case 'resume-game': togglePause(false); break;
-    case 'restart-stage': togglePause(false); startStageGameplay(); break;
+    case 'restart-stage':
+      togglePause(false);
+      // Modo amistad: un jugador eliminado no puede revivir reiniciando la etapa desde la pausa
+      if (mpFriendMode() && GAME.level && GAME.level.dead) break;
+      startStageGameplay();
+      break;
     case 'quit-menu': fullReset(); showScreen('screen-menu'); break;
     case 'retry-run': fullReset(); showScreen('screen-menu'); break;
     case 'controller-reveal-continue': showPotionChoiceScreen(); break;
@@ -1206,6 +1337,14 @@ function handleAction(action, btn) {
         GAME.stageIndex = STAGES.findIndex(st => st.objectiveType === 'killStreak');
         mpBeginSelectionForAll();
       } else startStageGameplay();
+      break;
+    case 'chaos-again':
+      // Modo caos: solo el Admin reinicia, y siempre desde la etapa 1 para todos
+      if (!mpIsActive() || !MP.isHost) break;
+      GAME.phaseSkip = false; GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
+      GAME.paused = false; MP._doneIds = [];
+      mpFreshSelection();
+      mpBeginSelectionForAll();
       break;
     case 'kills-exit': {
       const wasMp = mpIsActive();
@@ -1866,6 +2005,7 @@ function startStageGameplay() {
   document.getElementById('hud-boss').classList.remove('show');
   const deadOverlay = document.getElementById('hud-dead-overlay');
   if (deadOverlay) deadOverlay.classList.remove('show');
+  MP._doneIds = [];
   updateWeaponSlotsUI();
   updateObjectiveUI();
 
@@ -2285,7 +2425,7 @@ function update(dt) {
   if (!level.dead) {
     level.camera.x = lerp(level.camera.x, level.player.x, 0.12);
     level.camera.y = lerp(level.camera.y, level.player.y, 0.12);
-  } else if (mpIsActive() && stage.objectiveType === 'killStreak') {
+  } else if (mpSpectating(level)) {
     // espectador: la cámara sigue a un compañero vivo
     const t = mpSpectateTarget(level);
     if (t) { level.camera.x = lerp(level.camera.x, t.rx, 0.12); level.camera.y = lerp(level.camera.y, t.ry, 0.12); }
@@ -2295,7 +2435,7 @@ function update(dt) {
   // congelada de cuando cayó (p. ej. si murió justo parado en la zona
   // segura). Eso lo sacaba de la pantalla de eliminado hacia la de espera
   // sin poder volver, obligándolo a reiniciar toda la etapa para salir.
-  if (!level.dead) checkStageCompletion(level);
+  if (!level.dead || (mpFriendMode() && level.subPhase === 'bossDefeatedCutscene')) checkStageCompletion(level);
   level._hudT = (level._hudT === undefined ? 1 : level._hudT) + dt;
   if (level._hudT >= 0.1) { level._hudT = 0; updateHUD(level); }
   if (mpIsActive()) mpBroadcastMyState(level, dt);
@@ -2549,7 +2689,8 @@ function updateBullets(level, dt) {
 // Al caer, el jugador mira la partida siguiendo a un compañero que sigue con vida, hasta que
 // caiga el último jugador. Puede cambiar de compañero con los botones ANTERIOR / SIGUIENTE.
 function mpSpectateList() {
-  return Object.values(MP.remoteStates || {}).filter(s => s && !s.dead && s.rx !== undefined)
+  const done = MP._doneIds || [];
+  return Object.values(MP.remoteStates || {}).filter(s => s && !s.dead && s.rx !== undefined && !done.includes(s.id))
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 function mpSpectateTarget(level) {
@@ -2638,9 +2779,10 @@ function updateKillStreak(level, dt) {
   }
 
   // Multijugador: la partida termina cuando cayeron TODOS (el Admin lo decide y avisa al resto)
-  if (mpIsActive() && MP.isHost && level.dead) {
+  if (mpIsActive() && MP.isHost && (level.dead || mpChaosMode())) {
     const someoneAlive = MP.conns.some(c => { const s = MP.remoteStates[c.peer]; return !s || !s.dead; });
-    if (!someoneAlive) {
+    const anyDown = level.dead || MP.conns.some(c => { const s = MP.remoteStates[c.peer]; return !!(s && s.dead); });
+    if (mpChaosMode() ? anyDown : !someoneAlive) { // Modo caos: basta con que caiga uno
       const time = Math.floor(level.time);
       const board = killStreakBuildBoard(level, time);
       const kills = board.reduce((a, r) => a + r.kills, 0);
@@ -2732,6 +2874,7 @@ function showRealStageFail(level, title, sub) {
   level.subPhase = 'complete';
   document.getElementById('stage-fail-title').textContent = title;
   document.getElementById('stage-fail-sub').textContent = sub;
+  stageFailButtons(false);
   cancelAnimationFrame(GAME.rafId);
   stopBossMusic();
   showScreen('screen-stage-fail');
@@ -2751,14 +2894,21 @@ function markLocalPlayerDead(level, title, sub) {
     const subEl = document.getElementById('dead-overlay-sub');
     if (titleEl) titleEl.textContent = title;
     const ks = level.stage.objectiveType === 'killStreak';
+    const friend = mpFriendMode();
+    const chaos = mpChaosMode();
+    const noRevive = ks || friend || chaos; // recolección de bajas, Modo amistad y Modo caos: caer es definitivo
     if (subEl) subEl.textContent = ks
       ? 'Modo espectador: mirarás a tus compañeros hasta que caiga el último jugador.'
-      : sub + ' Los enemigos ya no te atacan. Presiona "Volver a jugar" para reaparecer aquí mismo.';
+      : chaos
+        ? 'MODO CAOS: si un jugador cae, todos pierden.'
+        : friend
+          ? 'MODO AMISTAD: no puedes revivir. Mirarás a tus compañeros y volverás a jugar en la siguiente fase.'
+          : sub + ' Los enemigos ya no te atacan. Presiona "Volver a jugar" para reaparecer aquí mismo.';
     const reviveBtn = overlay.querySelector('[data-action="revive-player"]');
-    if (reviveBtn) reviveBtn.style.display = ks ? 'none' : ''; // en recolección de bajas no se revive
+    if (reviveBtn) reviveBtn.style.display = noRevive ? 'none' : '';
     const specBox = document.getElementById('spectate-box');
-    if (specBox) specBox.style.display = ks && mpIsActive() ? '' : 'none';
-    if (ks) level.spectateId = null;
+    if (specBox) specBox.style.display = noRevive && mpIsActive() && !chaos ? '' : 'none';
+    if (noRevive) level.spectateId = null;
     overlay.classList.add('show');
   }
   mpSendMyStateNow(level); // avisar de inmediato, sin esperar el próximo tick
@@ -2772,6 +2922,7 @@ function markLocalPlayerDead(level, title, sub) {
       else if (MP.hostConn) { try { MP.hostConn.send({ type: 'release-npc', id: mine.id }); } catch (e) { /* noop */ } }
     }
   }
+  if (MP.isHost) { mpFriendCheck(); mpChaosCheck(); } // Modo amistad: si ya cayeron todos, se acaba · Modo caos: si cae uno, pierden todos
 }
 
 // Revive al jugador local en el mismo lugar donde cayó, con la vida al
@@ -2780,7 +2931,7 @@ function markLocalPlayerDead(level, title, sub) {
 // enemigos vuelven a perseguirlo y atacarlo con normalidad.
 function reviveLocalPlayer(level) {
   if (!level || !level.dead) return;
-  if (level.stage.objectiveType === 'killStreak') return; // recolección de bajas: caer es definitivo
+  if (mpNoRevive(level)) return; // recolección de bajas y Modo amistad: caer es definitivo en esta fase
   level.dead = false;
   if (level.vehicle) level.vehicle.hp = level.vehicle.maxHp;
   level.player.hp = level.player.maxHp;
@@ -3363,7 +3514,7 @@ function runBossCutscene(level) {
 function advanceStage() {
   cancelAnimationFrame(GAME.rafId);
   stopBossMusic();
-  if (mpIsActive()) MP.readyChoices = {}; // que no queden "listos" de la fase anterior
+  if (mpIsActive()) { MP.readyChoices = {}; MP.remoteStates = {}; MP._doneIds = []; } // que no queden "listos" ni eliminados de la fase anterior
   GAME.selection.vehicle = null; // que nadie arranque la fase nueva con la montura vieja
   const lv = GAME.level;
   if (mpIsActive() && lv && lv.stage.objectiveType === 'findNPC') GAME.run.rescued = lv.rescuedBase + lv.npcs.filter(n => n.found).length;
@@ -4103,7 +4254,7 @@ function updateBossHUD(level) {
 
 function updateHUD(level) {
   updateBossHUD(level);
-  if (level.dead && mpIsActive() && level.stage.objectiveType === 'killStreak') mpUpdateSpectateUI(level);
+  if (mpSpectating(level)) mpUpdateSpectateUI(level);
   document.getElementById('hud-player-hp').style.width = clamp(level.player.hp / level.player.maxHp * 100, 0, 100) + '%';
   const vBlock = document.getElementById('hud-vehicle-block');
   if (level.vehicle) {
