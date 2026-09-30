@@ -512,6 +512,8 @@ function mpCreateRoom() {
       delete MP.remoteStates[conn.peer];
       if (MP._peerRelay) delete MP._peerRelay[conn.peer];
       mpBroadcastPlayerList();
+      // Si ya empezó la selección o la partida y el Admin se queda solo, no se puede seguir jugando
+      if (MP.isHost && MP.peer && MP.players.length < 2 && !['screen-menu', 'screen-mp-join', 'screen-mp-lobby'].includes(GAME.screen)) { mpNotEnoughPlayers(); return; }
       mpFriendCheck();
     });
   });
@@ -698,6 +700,29 @@ function mpLeaveRoom() {
   if (wasHost) MP.conns.forEach(c => { try { c.send({ type: 'host-left' }); } catch (e) { /* noop */ } });
   mpResetState(wasHost);
   showScreen('screen-menu');
+}
+
+// Ventana de aviso genérica (multijugador): bloquea la pantalla hasta que se presiona el botón.
+function mpShowNotice(title, text, sub, btnLabel) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('mp-notice-title', title); set('mp-notice-text', text); set('mp-notice-sub', sub); set('mp-notice-btn', btnLabel);
+  const ov = document.getElementById('mp-notice-overlay');
+  if (ov) ov.classList.add('show');
+}
+
+// Admin: todos los invitados se fueron y no quedan jugadores suficientes.
+function mpNotEnoughPlayers() {
+  fullReset();
+  mpResetState();
+  showScreen('screen-menu');
+  mpShowNotice('NO HAY SUFICIENTES JUGADORES', 'No hay suficientes jugadores para poder jugar.', 'El resto de los jugadores abandonó la partida.', 'IR A LA PANTALLA DE INICIO');
+}
+
+// Salir al menú desde la selección o desde la partida. Si quien sale es un invitado, ve un aviso.
+function mpExitToMenu() {
+  const wasGuest = mpIsActive() && !MP.isHost && !!MP.code;
+  mpLeaveRoom();
+  if (wasGuest) mpShowNotice('HAS ABANDONADO LA PARTIDA', 'Has abandonado la partida.', 'Ya no participas en esta sala.', 'ACEPTAR');
 }
 
 // Invitados: el Admin abandonó la sala/partida. Se corta la conexión y se muestra un aviso
@@ -1351,7 +1376,7 @@ function handleAction(action, btn) {
       break;
     case 'back-character':
       // ATRÁS: vuelve directo al menú de inicio; en multijugador además sale de la sala
-      if (mpIsActive()) mpLeaveRoom(); else { GAME.phaseSkip = false; showScreen('screen-menu'); }
+      if (mpIsActive()) mpExitToMenu(); else { GAME.phaseSkip = false; showScreen('screen-menu'); }
       break;
     case 'back-vehicle':
       GAME.phaseSkip = !!GAME.skipEntry; // se deshace lo que hizo CONTINUAR, para poder volver a avanzar
@@ -1380,8 +1405,14 @@ function handleAction(action, btn) {
       if (mpFriendMode() && GAME.level && GAME.level.dead) break;
       startStageGameplay();
       break;
-    case 'quit-menu': fullReset(); if (mpIsActive()) mpLeaveRoom(); else showScreen('screen-menu'); break;
-    case 'retry-run': fullReset(); if (mpIsActive()) mpLeaveRoom(); else showScreen('screen-menu'); break;
+    case 'quit-menu': fullReset(); if (mpIsActive()) mpExitToMenu(); else showScreen('screen-menu'); break;
+    case 'retry-run': fullReset(); if (mpIsActive()) mpExitToMenu(); else showScreen('screen-menu'); break;
+    case 'mp-notice-close': {
+      const ov2 = document.getElementById('mp-notice-overlay');
+      if (ov2) ov2.classList.remove('show');
+      showScreen('screen-menu');
+      break;
+    }
     case 'host-left-home': {
       const ov = document.getElementById('host-left-overlay');
       if (ov) ov.classList.remove('show');
@@ -1412,7 +1443,7 @@ function handleAction(action, btn) {
     case 'kills-exit': {
       const wasMp = mpIsActive();
       fullReset();
-      if (wasMp) mpLeaveRoom(); else showScreen('screen-menu');
+      if (wasMp) mpExitToMenu(); else showScreen('screen-menu');
       break;
     }
     case 'force-fullscreen': requestGameFullscreen(true); break;

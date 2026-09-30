@@ -525,6 +525,16 @@
   </div>
 </div>
 
+<!-- Aviso genérico de multijugador (invitado que abandona / Admin sin jugadores suficientes) -->
+<div id="mp-notice-overlay" role="alertdialog" aria-modal="true" aria-labelledby="mp-notice-title">
+  <div class="host-left-box">
+    <h2 id="mp-notice-title">AVISO</h2>
+    <p id="mp-notice-text"></p>
+    <p class="host-left-sub" id="mp-notice-sub"></p>
+    <button class="btn btn-primary" id="mp-notice-btn" data-action="mp-notice-close">ACEPTAR</button>
+  </div>
+</div>
+
 <!-- Aviso si el teléfono queda en vertical: el juego solo se juega en horizontal -->
 <style>
   #rotate-overlay{ display:none; position:fixed; inset:0; z-index:2147483647; background:#10160f; color:#9dfb4c;

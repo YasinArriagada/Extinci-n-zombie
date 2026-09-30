@@ -624,3 +624,7 @@ html,body{
 .host-left-box h2{ font-family:var(--font-display); letter-spacing:3px; color:var(--blood); font-size:1.8rem; margin:0 0 10px; }
 .host-left-box p{ margin:0 0 8px; color:var(--bone); }
 .host-left-box .host-left-sub{ font-size:0.85rem; color:#8aa07a; margin-bottom:22px; }
+
+#mp-notice-overlay{ display:none; position:fixed; inset:0; z-index:2147483000; background:rgba(6,8,6,0.94);
+  align-items:center; justify-content:center; padding:20px; }
+#mp-notice-overlay.show{ display:flex; }
