@@ -279,7 +279,13 @@ const ROOM_MODES = {
   chaos:      { label: 'MODO CAOS' },
   normal:     { label: 'MODO NORMAL' },
 };
-function roomModeKey() { return ROOM_MODES[MP.mode] ? MP.mode : 'normal'; }
+// SALTO DE FASE -> Recolección de bajas en multijugador: NO usa modos de sala (ni Amistad, ni Caos, ni Normal);
+// esa fase siempre funciona con sus propias reglas de siempre.
+function mpKillsNoModes() {
+  const st = STAGES[GAME.stageIndex];
+  return !!(GAME.phaseSkip && st && st.objectiveType === 'killStreak');
+}
+function roomModeKey() { return mpKillsNoModes() ? 'normal' : (ROOM_MODES[MP.mode] ? MP.mode : 'normal'); }
 // true solo en una sala multijugador en curso con el Modo amistad elegido
 function mpFriendMode() { return !!MP.peer && roomModeKey() === 'friendship'; }
 // true solo en una sala multijugador en curso con el Modo caos elegido.
@@ -295,6 +301,10 @@ function updateRoomModeUI() {
   document.querySelectorAll('.room-mode-btn').forEach(b => b.classList.toggle('selected', b.dataset.mode === cur));
   const lobby = document.getElementById('mp-room-mode');
   if (lobby) lobby.textContent = ROOM_MODES[cur].label;
+  // Recolección de bajas (salto de fase): se ocultan los modos de sala. Los invitados lo saben por el aviso del Admin.
+  const hide = mpKillsNoModes() || !!MP._killsNoModes;
+  document.querySelectorAll('.room-mode-picker').forEach(el => { el.style.display = hide ? 'none' : ''; });
+  if (lobby && lobby.parentElement) lobby.parentElement.style.display = hide ? 'none' : '';
 }
 
 function mpMyId() { return MP.isHost ? 'host' : (MP.peer ? MP.peer.id : null); }
@@ -389,7 +399,7 @@ function mpUpdateLobbyUI() {
 }
 
 function mpBroadcastPlayerList() {
-  MP.conns.forEach(c => { try { c.send({ type: 'players', players: MP.players, mode: roomModeKey() }); } catch (e) { /* noop */ } });
+  MP.conns.forEach(c => { try { c.send({ type: 'players', players: MP.players, mode: roomModeKey(), noModes: mpKillsNoModes() }); } catch (e) { /* noop */ } });
   mpUpdateLobbyUI();
 }
 
@@ -528,7 +538,7 @@ function mpJoinRoom(code) {
       }
       // El Admin da la señal para que la batalla definitiva empiece a la vez en todos.
       if (data.type === 'final-battle-start') { if (GAME.screen === 'screen-challenge') startFinalBattle(); }
-      if (data.type === 'players') { MP.code = code.toUpperCase(); MP.players = data.players; if (ROOM_MODES[data.mode]) MP.mode = data.mode; mpUpdateLobbyUI(); }
+      if (data.type === 'players') { MP.code = code.toUpperCase(); MP.players = data.players; if (ROOM_MODES[data.mode]) MP.mode = data.mode; MP._killsNoModes = !!data.noModes; mpUpdateLobbyUI(); }
       if (data.type === 'full') { mpShowJoinError('Esa sala ya tiene 5 jugadores.'); mpLeaveRoom(); }
       if (data.type === 'begin-selection') {
         MP.takenColors = {};
@@ -669,6 +679,7 @@ function mpResetState() {
   if (MP.peer) { try { MP.peer.destroy(); } catch (e) { /* noop */ } }
   MP.peer = null; MP.isHost = false; MP.code = null;
   MP.conns = []; MP.hostConn = null; MP.players = [];
+  MP._killsNoModes = false;
 }
 
 function mpLeaveRoom() {
