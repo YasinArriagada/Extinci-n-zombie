@@ -1327,7 +1327,7 @@ function handleAction(action, btn) {
       showScreen('screen-character');
       break;
     case 'back-character':
-      if (GAME.charBack) { if (GAME.charBack === 'screen-mode-select') updateKillsDiffUI(); showScreen(GAME.charBack); }
+      GAME.phaseSkip = false; showScreen('screen-menu'); // ATRÁS: vuelve directo al menú de inicio
       break;
     case 'back-vehicle':
       GAME.phaseSkip = !!GAME.skipEntry; // se deshace lo que hizo CONTINUAR, para poder volver a avanzar
