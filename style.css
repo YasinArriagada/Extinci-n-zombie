@@ -612,3 +612,15 @@ html,body{
 .room-mode-btn.selected[data-mode="friendship"]{ border-color:#9dfb4c; color:#9dfb4c; box-shadow:0 0 12px rgba(157,251,76,0.45); }
 .room-mode-btn.selected[data-mode="chaos"]{ border-color:#d1272d; color:#ff6b6b; box-shadow:0 0 12px rgba(209,39,45,0.55); }
 .room-mode-btn.selected[data-mode="normal"]{ border-color:#e0b13f; color:#e0b13f; box-shadow:0 0 12px rgba(224,177,63,0.45); }
+
+/* ---------- Aviso: el Admin abandonó la partida (invitados) ---------- */
+#host-left-overlay{ display:none; position:fixed; inset:0; z-index:2147483000; background:rgba(6,8,6,0.94);
+  align-items:center; justify-content:center; padding:20px; }
+#host-left-overlay.show{ display:flex; }
+.host-left-box{ max-width:460px; width:100%; text-align:center; padding:34px 28px;
+  background:linear-gradient(180deg, rgba(30,14,14,0.98), rgba(12,8,8,0.99)); border:1px solid var(--blood-dim);
+  box-shadow:0 0 60px rgba(209,39,45,0.25); clip-path:polygon(18px 0,100% 0,100% calc(100% - 18px),calc(100% - 18px) 100%,0 100%,0 18px); }
+.host-left-box svg{ width:64px; height:64px; margin-bottom:8px; }
+.host-left-box h2{ font-family:var(--font-display); letter-spacing:3px; color:var(--blood); font-size:1.8rem; margin:0 0 10px; }
+.host-left-box p{ margin:0 0 8px; color:var(--bone); }
+.host-left-box .host-left-sub{ font-size:0.85rem; color:#8aa07a; margin-bottom:22px; }

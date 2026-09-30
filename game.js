@@ -531,6 +531,8 @@ function mpJoinRoom(code) {
     MP.hostConn = conn;
     conn.on('open', () => { conn.send({ type: 'join', name: MP.myName }); });
     const handleHostData = data => {
+      // El Admin abandonó la partida: se corta todo y aparece el aviso de pérdida de señal.
+      if (data.type === 'host-left') { mpHostLeft(); return; }
       // Estado de otra etapa (p. ej. del jefe final mientras aquí aún no empezó la
       // batalla definitiva): se ignora para no mezclar jefes de distintas fases.
       if (data.sid !== undefined && (data.type === 'zombies' || data.type === 'enemies' || data.type === 'objective')) {
@@ -662,6 +664,8 @@ function mpJoinRoom(code) {
       } else { try { handleHostData(data); } catch (err) { console.error('mp msg error', err); } }
     });
     conn.on('error', () => { mpShowJoinError('No se pudo conectar. Revisá el código.'); mpLeaveRoom(); });
+    // Si la conexión con el Admin se cierra estando ya dentro de la sala (cerró la pestaña, se cayó, etc.)
+    conn.on('close', () => { if (!MP.isHost && MP.hostConn === conn && MP.code) mpHostLeft(); });
   });
   MP.peer.on('error', err => {
     mpShowJoinError(mpErrText(err));
@@ -675,8 +679,13 @@ function mpShowJoinError(msg) {
   if (el) el.textContent = msg;
 }
 
-function mpResetState() {
-  if (MP.peer) { try { MP.peer.destroy(); } catch (e) { /* noop */ } }
+function mpResetState(delayDestroy) {
+  if (MP.peer) {
+    const oldPeer = MP.peer;
+    // con delayDestroy se espera un instante para que el aviso "host-left" alcance a llegar a los invitados
+    if (delayDestroy) setTimeout(() => { try { oldPeer.destroy(); } catch (e) { /* noop */ } }, 500);
+    else { try { oldPeer.destroy(); } catch (e) { /* noop */ } }
+  }
   MP.peer = null; MP.isHost = false; MP.code = null;
   MP.conns = []; MP.hostConn = null; MP.players = [];
   MP._killsNoModes = false;
@@ -684,8 +693,22 @@ function mpResetState() {
 
 function mpLeaveRoom() {
   GAME.phaseSkip = false;
+  const wasHost = MP.isHost;
+  // Si sale el Admin, todos los invitados pierden la señal y ya no pueden jugar ni elegir nada
+  if (wasHost) MP.conns.forEach(c => { try { c.send({ type: 'host-left' }); } catch (e) { /* noop */ } });
+  mpResetState(wasHost);
+  showScreen('screen-menu');
+}
+
+// Invitados: el Admin abandonó la sala/partida. Se corta la conexión y se muestra un aviso
+// que bloquea toda la pantalla, con un único botón para volver al inicio.
+function mpHostLeft() {
+  if (!MP.peer || MP.isHost) return;
+  fullReset();
   mpResetState();
   showScreen('screen-menu');
+  const ov = document.getElementById('host-left-overlay');
+  if (ov) ov.classList.add('show');
 }
 
 // Si el internet se cae y sigue caído unos segundos en pleno multijugador, se sale de
@@ -1357,8 +1380,14 @@ function handleAction(action, btn) {
       if (mpFriendMode() && GAME.level && GAME.level.dead) break;
       startStageGameplay();
       break;
-    case 'quit-menu': fullReset(); showScreen('screen-menu'); break;
-    case 'retry-run': fullReset(); showScreen('screen-menu'); break;
+    case 'quit-menu': fullReset(); if (mpIsActive()) mpLeaveRoom(); else showScreen('screen-menu'); break;
+    case 'retry-run': fullReset(); if (mpIsActive()) mpLeaveRoom(); else showScreen('screen-menu'); break;
+    case 'host-left-home': {
+      const ov = document.getElementById('host-left-overlay');
+      if (ov) ov.classList.remove('show');
+      mpResetState(); fullReset(); showScreen('screen-menu');
+      break;
+    }
     case 'controller-reveal-continue': showPotionChoiceScreen(); break;
     case 'potion-yes': mpChooseEnding(true); break;
     case 'potion-no': mpChooseEnding(false); break;

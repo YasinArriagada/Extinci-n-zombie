@@ -514,6 +514,17 @@
 
 </div>
 
+<!-- Aviso para los invitados cuando el Admin abandona la partida: bloquea toda la pantalla -->
+<div id="host-left-overlay" role="alertdialog" aria-modal="true" aria-labelledby="host-left-title">
+  <div class="host-left-box">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#ff5050" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="#ff5050"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+    <h2 id="host-left-title">PÉRDIDA DE SEÑAL</h2>
+    <p>El Admin ha abandonado la partida.</p>
+    <p class="host-left-sub">La conexión se ha cortado y ya no se puede seguir jugando.</p>
+    <button class="btn btn-primary" data-action="host-left-home">VOLVER A LA PANTALLA DE INICIO</button>
+  </div>
+</div>
+
 <!-- Aviso si el teléfono queda en vertical: el juego solo se juega en horizontal -->
 <style>
   #rotate-overlay{ display:none; position:fixed; inset:0; z-index:2147483647; background:#10160f; color:#9dfb4c;
