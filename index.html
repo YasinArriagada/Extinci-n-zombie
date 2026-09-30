@@ -156,6 +156,14 @@
       <nav class="menu-buttons">
         <button class="btn btn-primary" data-action="mp-create">CREAR SALA</button>
       </nav>
+      <div class="room-mode-picker">
+        <div class="kills-diff-label">MODO DE LA SALA (lo elige quien la crea)</div>
+        <div class="room-mode-row">
+          <button class="btn btn-secondary room-mode-btn" data-action="room-mode" data-mode="friendship">MODO AMISTAD</button>
+          <button class="btn btn-secondary room-mode-btn" data-action="room-mode" data-mode="chaos">MODO CAOS</button>
+          <button class="btn btn-secondary room-mode-btn selected" data-action="room-mode" data-mode="normal">MODO NORMAL</button>
+        </div>
+      </div>
       <div class="mp-join-row">
         <input type="text" id="mp-code-input" maxlength="4" placeholder="CÓDIGO" class="mp-code-input" autocomplete="off" autocapitalize="characters">
         <button class="btn btn-secondary" data-action="mp-join">UNIRSE</button>
@@ -170,6 +178,7 @@
     <div class="panel-frame">
       <h2 class="panel-title">SALA DE ESPERA</h2>
       <p class="panel-sub">Código de sala: <span id="mp-room-code">—</span></p>
+      <p class="panel-sub">Modo de la sala: <span id="mp-room-mode">MODO NORMAL</span></p>
       <p class="panel-sub" id="mp-status">Conectando...</p>
       <div class="mp-player-list" id="mp-player-list"></div>
       <p class="panel-sub" id="mp-start-hint"></p>

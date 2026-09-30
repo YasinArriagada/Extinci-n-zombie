@@ -265,7 +265,25 @@ const MP = {
   takenColors: {},  // { playerId: color } — quién eligió qué color de montura
   stageDone: {},    // (host) { playerId: true } — quién ya llegó a su zona segura
   remoteStates: {}, // { playerId: {x,y,angle,vehicleDef,vehicleColor,charColor,charAccent,name} }
+  mode: 'normal',   // modo de la sala: 'friendship' | 'chaos' | 'normal' (lo elige el Admin al crearla)
 };
+
+// MODOS DE SALA (multijugador). El Admin elige uno en MULTIJUGADOR, debajo de CREAR SALA; el modo
+// viaja a todos los invitados (lista de jugadores y comienzo de la selección) y se muestra en la
+// sala de espera. Cualquier parte del juego puede consultarlo con roomModeKey().
+// Por ahora solo se elige y se muestra: los efectos de cada modo se definen aquí.
+const ROOM_MODES = {
+  friendship: { label: 'MODO AMISTAD' },
+  chaos:      { label: 'MODO CAOS' },
+  normal:     { label: 'MODO NORMAL' },
+};
+function roomModeKey() { return ROOM_MODES[MP.mode] ? MP.mode : 'normal'; }
+function updateRoomModeUI() {
+  const cur = roomModeKey();
+  document.querySelectorAll('.room-mode-btn').forEach(b => b.classList.toggle('selected', b.dataset.mode === cur));
+  const lobby = document.getElementById('mp-room-mode');
+  if (lobby) lobby.textContent = ROOM_MODES[cur].label;
+}
 
 function mpMyId() { return MP.isHost ? 'host' : (MP.peer ? MP.peer.id : null); }
 
@@ -345,6 +363,7 @@ function mpUpdateLobbyUI() {
   }
   const codeEl = document.getElementById('mp-room-code');
   if (codeEl) codeEl.textContent = MP.code || '—';
+  updateRoomModeUI();
   // Solo el Admin ve el botón, y solo se activa con 2 jugadores o más en la sala.
   const startBtn = document.getElementById('btn-mp-start');
   const enough = MP.players.length >= 2;
@@ -358,7 +377,7 @@ function mpUpdateLobbyUI() {
 }
 
 function mpBroadcastPlayerList() {
-  MP.conns.forEach(c => { try { c.send({ type: 'players', players: MP.players }); } catch (e) { /* noop */ } });
+  MP.conns.forEach(c => { try { c.send({ type: 'players', players: MP.players, mode: roomModeKey() }); } catch (e) { /* noop */ } });
   mpUpdateLobbyUI();
 }
 
@@ -495,10 +514,11 @@ function mpJoinRoom(code) {
       }
       // El Admin da la señal para que la batalla definitiva empiece a la vez en todos.
       if (data.type === 'final-battle-start') { if (GAME.screen === 'screen-challenge') startFinalBattle(); }
-      if (data.type === 'players') { MP.code = code.toUpperCase(); MP.players = data.players; mpUpdateLobbyUI(); }
+      if (data.type === 'players') { MP.code = code.toUpperCase(); MP.players = data.players; if (ROOM_MODES[data.mode]) MP.mode = data.mode; mpUpdateLobbyUI(); }
       if (data.type === 'full') { mpShowJoinError('Esa sala ya tiene 5 jugadores.'); mpLeaveRoom(); }
       if (data.type === 'begin-selection') {
         MP.takenColors = {};
+        if (ROOM_MODES[data.roomMode]) MP.mode = data.roomMode;
         if (KILL_DIFFS[data.killDiff]) GAME.killDifficulty = data.killDiff;
         // el Admin puede arrancar en otra etapa (modo especial "Recolección de bajas")
         if (typeof data.stageIndex === 'number' && data.stageIndex > 0 && STAGES[data.stageIndex]) {
@@ -682,7 +702,7 @@ function mpBeginSelectionForAll() {
   MP.takenColors = {};
   MP.stageDone = {};
   MP.remoteStates = {};
-  MP.conns.forEach(c => { try { c.send({ type: 'begin-selection', stageIndex: GAME.phaseSkip ? GAME.stageIndex : 0, killDiff: killDiffKey() }); } catch (e) { /* noop */ } });
+  MP.conns.forEach(c => { try { c.send({ type: 'begin-selection', stageIndex: GAME.phaseSkip ? GAME.stageIndex : 0, killDiff: killDiffKey(), roomMode: roomModeKey() }); } catch (e) { /* noop */ } });
   if (!GAME.phaseSkip) { GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 }; }
   buildCharacterGrid();
   showScreen('screen-character');
@@ -1099,6 +1119,9 @@ function handleAction(action, btn) {
     case 'kills-diff':
       if (btn && KILL_DIFFS[btn.dataset.diff]) { GAME.killDifficulty = btn.dataset.diff; updateKillsDiffUI(); }
       break;
+    case 'room-mode':
+      if (btn && ROOM_MODES[btn.dataset.mode]) { MP.mode = btn.dataset.mode; updateRoomModeUI(); }
+      break;
     case 'goto-character': buildCharacterGrid(); showScreen('screen-character'); break;
     case 'goto-settings': showScreen('screen-settings'); break;
     case 'goto-controls': showScreen('screen-controls'); break;
@@ -1109,6 +1132,7 @@ function handleAction(action, btn) {
       if (!mpIsOnline()) { if (modeErr) modeErr.textContent = MP_MSG_OFFLINE; break; } // sin internet no se entra
       if (modeErr) modeErr.textContent = '';
       document.getElementById('mp-join-error').textContent = '';
+      updateRoomModeUI();
       showScreen('screen-mp-join');
       mpEnsurePeerLib(); // se va descargando mientras el jugador escribe su nombre
       break;

@@ -601,3 +601,11 @@ html,body{
 .diff-btn.selected[data-diff="easy"]{ border-color:#9dfb4c; color:#9dfb4c; box-shadow:0 0 12px rgba(157,251,76,0.45); }
 .diff-btn.selected[data-diff="normal"]{ border-color:#e0b13f; color:#e0b13f; box-shadow:0 0 12px rgba(224,177,63,0.45); }
 .diff-btn.selected[data-diff="hard"]{ border-color:#d1272d; color:#ff6b6b; box-shadow:0 0 12px rgba(209,39,45,0.55); }
+
+/* Multijugador: selector de modo de sala (debajo de CREAR SALA) */
+.room-mode-picker{ display:flex; flex-direction:column; align-items:center; gap:6px; margin:14px 0 6px; }
+.room-mode-row{ display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+.room-mode-btn{ padding:10px 12px; font-size:0.75rem; min-width:96px; }
+.room-mode-btn.selected[data-mode="friendship"]{ border-color:#9dfb4c; color:#9dfb4c; box-shadow:0 0 12px rgba(157,251,76,0.45); }
+.room-mode-btn.selected[data-mode="chaos"]{ border-color:#d1272d; color:#ff6b6b; box-shadow:0 0 12px rgba(209,39,45,0.55); }
+.room-mode-btn.selected[data-mode="normal"]{ border-color:#e0b13f; color:#e0b13f; box-shadow:0 0 12px rgba(224,177,63,0.45); }
