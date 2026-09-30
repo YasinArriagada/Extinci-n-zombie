@@ -593,8 +593,6 @@ html,body{
 .kills-total-num{ font-family:'Anton',sans-serif; font-size:2.6rem; color:#9dfb4c; line-height:1.1; }
 
 /* Recolección de bajas: selector de dificultad */
-.mp-create-row{ display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; }
-.mp-create-row .menu-buttons{ margin:0; }
 .kills-diff-picker{ display:none; flex-direction:column; align-items:center; gap:6px; margin:10px 0; }
 .kills-diff-picker.show{ display:flex; }
 .kills-diff-label{ font-size:0.7rem; letter-spacing:2px; color:var(--bone); opacity:0.8; }

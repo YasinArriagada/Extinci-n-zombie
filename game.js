@@ -1109,7 +1109,6 @@ function handleAction(action, btn) {
       if (!mpIsOnline()) { if (modeErr) modeErr.textContent = MP_MSG_OFFLINE; break; } // sin internet no se entra
       if (modeErr) modeErr.textContent = '';
       document.getElementById('mp-join-error').textContent = '';
-      updateKillsDiffUI(); // multijugador: junto a CREAR SALA
       showScreen('screen-mp-join');
       mpEnsurePeerLib(); // se va descargando mientras el jugador escribe su nombre
       break;
@@ -1149,7 +1148,7 @@ function handleAction(action, btn) {
       if (STAGES[GAME.stageIndex].special) {
         // Recolección de bajas: se puede jugar en solitario o en multijugador
         const modeErr = document.getElementById('mode-select-error'); if (modeErr) modeErr.textContent = '';
-        updateKillsDiffUI(); // solitario: aquí se elige la dificultad
+        updateKillsDiffUI(); // aquí se elige la dificultad, para solitario y multijugador
         showScreen('screen-mode-select');
         break;
       }
@@ -2564,7 +2563,7 @@ function killDiffKey() { return KILL_DIFFS[GAME.killDifficulty] ? GAME.killDiffi
 function killDiffCfg(level) { return KILL_DIFFS[(level && level.killDiff) || killDiffKey()] || KILL_DIFFS.normal; }
 
 // Muestra los 3 botones de dificultad solo cuando se eligió la Recolección de bajas en SALTO DE FASE
-// (en la pantalla de modo, para solitario, y junto a CREAR SALA, para multijugador).
+// (en la pantalla de modo, antes de elegir SOLITARIO o MULTIJUGADOR: vale para ambos).
 function updateKillsDiffUI() {
   const st = STAGES[GAME.stageIndex];
   const show = !!(GAME.phaseSkip && st && st.objectiveType === 'killStreak');

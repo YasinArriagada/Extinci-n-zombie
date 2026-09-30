@@ -153,19 +153,9 @@
         <label for="mp-name-input" class="mp-name-label">Tu nombre de jugador</label>
         <input type="text" id="mp-name-input" maxlength="14" placeholder="Ej: Jugador" class="mp-name-input" autocomplete="off">
       </div>
-      <div class="mp-create-row">
-        <nav class="menu-buttons">
-          <button class="btn btn-primary" data-action="mp-create">CREAR SALA</button>
-        </nav>
-        <div class="kills-diff-picker">
-          <div class="kills-diff-label">DIFICULTAD</div>
-          <div class="kills-diff-row">
-            <button class="btn btn-secondary diff-btn" data-action="kills-diff" data-diff="easy">FÁCIL</button>
-            <button class="btn btn-secondary diff-btn selected" data-action="kills-diff" data-diff="normal">NORMAL</button>
-            <button class="btn btn-secondary diff-btn" data-action="kills-diff" data-diff="hard">DIFÍCIL</button>
-          </div>
-        </div>
-      </div>
+      <nav class="menu-buttons">
+        <button class="btn btn-primary" data-action="mp-create">CREAR SALA</button>
+      </nav>
       <div class="mp-join-row">
         <input type="text" id="mp-code-input" maxlength="4" placeholder="CÓDIGO" class="mp-code-input" autocomplete="off" autocapitalize="characters">
         <button class="btn btn-secondary" data-action="mp-join">UNIRSE</button>
