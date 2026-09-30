@@ -3002,7 +3002,10 @@ function markLocalPlayerDead(level, title, sub) {
     const reviveBtn = overlay.querySelector('[data-action="revive-player"]');
     if (reviveBtn) reviveBtn.style.display = noRevive ? 'none' : '';
     const specBox = document.getElementById('spectate-box');
-    if (specBox) specBox.style.display = noRevive && mpIsActive() && !chaos ? '' : 'none';
+    const spectate = noRevive && mpIsActive() && !chaos;
+    if (specBox) specBox.style.display = spectate ? '' : 'none';
+    // espectador: el aviso pasa a una barra compacta abajo para dejar ver la partida de los compañeros
+    overlay.classList.toggle('spectating', spectate);
     if (noRevive) level.spectateId = null;
     overlay.classList.add('show');
   }

@@ -572,6 +572,28 @@ html,body{
 }
 @keyframes dead-fade-in{ from{ opacity:0; transform:translateY(-8px);} to{ opacity:1; transform:translateY(0);} }
 
+/* ---- Modo espectador: barra compacta abajo para no tapar la partida de los compañeros ---- */
+.spectate-box{ margin-top:6px; display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:6px 8px; }
+.spectate-name{ flex:1 0 100%; font-size:0.85rem; letter-spacing:1px; color:var(--bone); }
+.spectate-btn{ margin-top:0; }
+.hud-dead-overlay.spectating{ align-items:flex-end; padding-top:0; padding-bottom:max(10px, env(safe-area-inset-bottom)); }
+.hud-dead-overlay.spectating .dead-overlay-box{
+  background: rgba(10,14,9,0.6); padding:6px 12px; max-width:96%;
+  box-shadow: 0 0 10px rgba(209,39,45,0.25);
+}
+.hud-dead-overlay.spectating .dead-overlay-title{ font-size:0.85rem; letter-spacing:1.5px; }
+.hud-dead-overlay.spectating .dead-overlay-sub{ display:none; }
+.hud-dead-overlay.spectating .spectate-box{ margin-top:4px; }
+.hud-dead-overlay.spectating .spectate-name{ font-size:0.75rem; }
+.hud-dead-overlay.spectating .spectate-btn{ font-size:0.7rem; padding:6px 14px; min-height:36px; }
+@media (min-width:520px){
+  /* en pantallas anchas: ANTERIOR · nombre · SIGUIENTE en una sola fila */
+  .spectate-box{ flex-wrap:nowrap; }
+  .spectate-name{ flex:0 1 auto; min-width:150px; order:0; }
+  .spectate-prev{ order:-1; }
+  .spectate-next{ order:1; }
+}
+
 /* Frase del zombie con lentes al aceptar el desafío */
 .challenge-quote{ font-size:1.2rem; opacity:1; color:#ff8a8a; text-shadow:0 0 12px rgba(209,39,45,0.6); line-height:1.5; margin: 6px 0 4px; }
 
