@@ -507,6 +507,22 @@ html,body{
 .mode-select-panel .panel-title{ font-size: 2.6rem; margin-bottom: 40px; }
 .mode-select-panel .menu-buttons .btn{ font-size: 1.15rem; padding: 22px 70px; }
 .mode-select-back{ margin-top: 16px; }
+/* Centrado "seguro": con justify-content:center, si el contenido no cabe en altura se corta por ARRIBA
+   (el título quedaba a medias) y no se puede llegar con el scroll. Estos espaciadores centran cuando
+   sobra lugar y, cuando no, se colapsan y todo queda accesible con scroll desde el título. */
+.mode-select-panel{ justify-content:flex-start; }
+.mode-select-panel::before, .mode-select-panel::after{ content:''; flex:0 0 0; }
+.mode-select-panel::before{ margin-top:auto; }
+.mode-select-panel::after{ margin-bottom:auto; }
+
+/* Celulares en horizontal (pantalla baja): todo más compacto para que título, botones y VOLVER se vean juntos */
+@media (max-height: 520px){
+  .mode-select-panel{ min-height:0; padding:14px 24px; max-height:96vh; }
+  .mode-select-panel .panel-title{ font-size:1.5rem; margin-bottom:10px; }
+  .mode-select-panel .menu-buttons{ margin-top:0; gap:10px; }
+  .mode-select-panel .menu-buttons .btn{ font-size:0.9rem; padding:10px 40px; letter-spacing:2px; }
+  .mode-select-back{ margin-top:10px; font-size:0.8rem; padding:8px 30px; }
+}
 
 @media (max-width: 700px){
   .mode-select-panel{ width: 94vw; min-height: 60vh; }
