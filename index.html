@@ -445,6 +445,43 @@
 
 </div>
 
+<!-- Aviso si el teléfono queda en vertical: el juego solo se juega en horizontal -->
+<style>
+  #rotate-overlay{ display:none; position:fixed; inset:0; z-index:2147483647; background:#10160f; color:#9dfb4c;
+    flex-direction:column; align-items:center; justify-content:center; gap:18px; text-align:center;
+    font-family:'Anton','Chakra Petch',sans-serif; letter-spacing:3px; font-size:1.4rem; padding:24px; }
+  #rotate-overlay small{ font-family:'Chakra Petch',sans-serif; letter-spacing:1px; font-size:0.85rem; color:#8aa07a; }
+  #rotate-overlay svg{ width:84px; height:84px; animation:rotate-hint 2s ease-in-out infinite; }
+  @keyframes rotate-hint{ 0%,20%{ transform:rotate(0deg); } 60%,100%{ transform:rotate(-90deg); } }
+  @media (orientation: portrait) and (pointer: coarse) and (max-width: 900px){ #rotate-overlay{ display:flex; } }
+</style>
+<div id="rotate-overlay" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#9dfb4c" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18.5" x2="13" y2="18.5"/></svg>
+  <div>GIRA TU TELÉFONO</div>
+  <small>Extinción Zombie se juega en horizontal</small>
+</div>
+
+<script>
+  // Mantiene el juego en horizontal desde que entras hasta que sales (en la app instalada).
+  // Algunos navegadores solo permiten bloquear la orientación tras un toque, por eso se reintenta.
+  (function () {
+    var locked = false;
+    function lockLandscape() {
+      if (locked) return;
+      try {
+        var o = screen.orientation;
+        if (o && o.lock) {
+          var p = o.lock('landscape');
+          if (p && p.then) p.then(function () { locked = true; }).catch(function () {});
+        }
+      } catch (e) {}
+    }
+    lockLandscape();
+    ['touchend', 'pointerup', 'click'].forEach(function (ev) { document.addEventListener(ev, lockLandscape, { passive: true }); });
+    document.addEventListener('fullscreenchange', function () { locked = false; lockLandscape(); });
+  })();
+</script>
+
 <script>
   // Modo solitario sin internet: el service worker guarda el juego en el dispositivo
   // la primera vez que se abre con conexión. (PeerJS, solo para multijugador, se carga
