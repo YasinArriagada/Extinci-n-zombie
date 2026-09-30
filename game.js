@@ -538,10 +538,13 @@ function mpJoinRoom(code) {
         if (typeof data.stageIndex === 'number' && data.stageIndex > 0 && STAGES[data.stageIndex]) {
           GAME.phaseSkip = true; GAME.stageIndex = data.stageIndex; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
         } else {
-          // partida normal (o reinicio del Modo caos): siempre desde la etapa 1 y con la selección limpia
-          GAME.phaseSkip = false; GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
-          GAME.paused = false; MP.remoteStates = {}; MP._doneIds = [];
-          mpFreshSelection();
+          GAME.phaseSkip = false;
+          if (mpChaosMode()) {
+            // solo Modo caos (reinicio tras perder): de nuevo desde la etapa 1 y con la selección limpia
+            GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
+            GAME.paused = false; MP.remoteStates = {}; MP._doneIds = [];
+            mpFreshSelection();
+          }
         }
         buildCharacterGrid(); showScreen('screen-character');
       }
