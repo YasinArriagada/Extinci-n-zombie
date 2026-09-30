@@ -348,6 +348,14 @@
       <div class="dead-overlay-box">
         <div class="dead-overlay-title" id="dead-overlay-title">HAS CAÍDO</div>
         <div class="dead-overlay-sub" id="dead-overlay-sub">Los enemigos ya no te atacan.</div>
+        <!-- Recolección de bajas (multijugador): modo espectador -->
+        <div id="spectate-box" style="display:none; margin-top:12px;">
+          <div id="spectate-name" style="font-size:0.85rem; letter-spacing:1px; margin-bottom:8px; color:var(--bone);"></div>
+          <div style="display:flex; gap:10px; justify-content:center;">
+            <button class="btn btn-secondary dead-overlay-btn" style="margin-top:0;" data-action="spectate-prev">‹ ANTERIOR</button>
+            <button class="btn btn-secondary dead-overlay-btn" style="margin-top:0;" data-action="spectate-next">SIGUIENTE ›</button>
+          </div>
+        </div>
         <button class="btn btn-primary dead-overlay-btn" data-action="revive-player">VOLVER A JUGAR</button>
       </div>
     </div>

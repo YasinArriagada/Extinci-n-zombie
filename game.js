@@ -149,7 +149,7 @@ const STAGES = [
   // (ver updateKillStreak y killStreakTypes).
   {
     id: 7, key: 'kills', name: 'RECOLECCIÓN DE BAJAS', special: true,
-    vehicleSet: null, requireWeapons: false, onFoot: true, companionSelect: true,
+    vehicleSet: null, requireWeapons: false, onFoot: true, companionSelect: false, // sin compañero
     resource: null, canRepair: false,
     objectiveType: 'killStreak',
     zombieTypes: ['walker'],
@@ -1129,6 +1129,8 @@ function handleAction(action) {
     }
     case 'mp-leave': mpLeaveRoom(); break;
     case 'revive-player': reviveLocalPlayer(GAME.level); break;
+    case 'spectate-prev': mpSpectateCycle(GAME.level, -1); break;
+    case 'spectate-next': mpSpectateCycle(GAME.level, 1); break;
     case 'mp-start':
       // solo el Admin, y solo con 2 jugadores o más en la sala
       if (MP.isHost && MP.players.length >= 2) mpBeginSelectionForAll();
@@ -1261,6 +1263,7 @@ function openVehicleSelectForCurrentStage() {
   const stage = STAGES[GAME.stageIndex];
   if (stage.onFoot) {
     if (stage.companionSelect) { buildCompanionGrid(); showScreen('screen-vehicle'); return; }
+    GAME.selection.companion = null; // etapas a pie sin compañero (Recolección de bajas)
     afterVehicleSelected();
     return;
   }
@@ -1803,7 +1806,7 @@ function startStageGameplay() {
     diff: stage.difficulty ? { ...stage.difficulty } : null, // multiplicadores de dificultad (batalla definitiva y recolección de bajas)
   };
 
-  if (stage.onFoot) {
+  if (stage.onFoot && stage.companionSelect) {
     level.companion = {
       def: GAME.selection.companion, x: player.x - 40, y: player.y, hp: 140, maxHp: 140,
       cd: 0, angle: 0,
@@ -2246,6 +2249,10 @@ function update(dt) {
   if (!level.dead) {
     level.camera.x = lerp(level.camera.x, level.player.x, 0.12);
     level.camera.y = lerp(level.camera.y, level.player.y, 0.12);
+  } else if (mpIsActive() && stage.objectiveType === 'killStreak') {
+    // espectador: la cámara sigue a un compañero vivo
+    const t = mpSpectateTarget(level);
+    if (t) { level.camera.x = lerp(level.camera.x, t.rx, 0.12); level.camera.y = lerp(level.camera.y, t.ry, 0.12); }
   }
 
   // Un jugador eliminado no puede "completar" la etapa con su posición
@@ -2496,6 +2503,34 @@ function updateBullets(level, dt) {
 
 /* ------------- MODO ESPECIAL: RECOLECCIÓN DE BAJAS ------------- */
 
+// ---- Modo espectador (Recolección de bajas, multijugador) ----
+// Al caer, el jugador mira la partida siguiendo a un compañero que sigue con vida, hasta que
+// caiga el último jugador. Puede cambiar de compañero con los botones ANTERIOR / SIGUIENTE.
+function mpSpectateList() {
+  return Object.values(MP.remoteStates || {}).filter(s => s && !s.dead && s.rx !== undefined)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+}
+function mpSpectateTarget(level) {
+  const list = mpSpectateList();
+  if (!list.length) return null;
+  let cur = list.find(s => s.id === level.spectateId);
+  if (!cur) { cur = list[0]; level.spectateId = cur.id; } // el que miraba cayó: pasa al siguiente vivo
+  return cur;
+}
+function mpSpectateCycle(level, dir) {
+  if (!level || !level.dead) return;
+  const list = mpSpectateList();
+  if (!list.length) return;
+  const i = list.findIndex(s => s.id === level.spectateId);
+  level.spectateId = list[(i + dir + list.length * 2) % list.length].id;
+}
+function mpUpdateSpectateUI(level) {
+  const el = document.getElementById('spectate-name');
+  if (!el) return;
+  const t = mpSpectateTarget(level);
+  el.textContent = t ? `👁 Viendo a: ${t.name || 'jugador'}` : 'Esperando...';
+}
+
 function killStreakBestKey() { return mpIsActive() ? 'ez_kills_best_mp' : 'ez_kills_best_solo'; }
 function killStreakBest() {
   try { return parseInt(localStorage.getItem(killStreakBestKey()), 10) || 0; } catch (e) { return 0; }
@@ -2594,10 +2629,13 @@ function markLocalPlayerDead(level, title, sub) {
     if (titleEl) titleEl.textContent = title;
     const ks = level.stage.objectiveType === 'killStreak';
     if (subEl) subEl.textContent = ks
-      ? sub + ' Miras la partida hasta que caiga todo el equipo.'
+      ? 'Modo espectador: mirarás a tus compañeros hasta que caiga el último jugador.'
       : sub + ' Los enemigos ya no te atacan. Presiona "Volver a jugar" para reaparecer aquí mismo.';
     const reviveBtn = overlay.querySelector('[data-action="revive-player"]');
     if (reviveBtn) reviveBtn.style.display = ks ? 'none' : ''; // en recolección de bajas no se revive
+    const specBox = document.getElementById('spectate-box');
+    if (specBox) specBox.style.display = ks && mpIsActive() ? '' : 'none';
+    if (ks) level.spectateId = null;
     overlay.classList.add('show');
   }
   mpSendMyStateNow(level); // avisar de inmediato, sin esperar el próximo tick
@@ -3942,6 +3980,7 @@ function updateBossHUD(level) {
 
 function updateHUD(level) {
   updateBossHUD(level);
+  if (level.dead && mpIsActive() && level.stage.objectiveType === 'killStreak') mpUpdateSpectateUI(level);
   document.getElementById('hud-player-hp').style.width = clamp(level.player.hp / level.player.maxHp * 100, 0, 100) + '%';
   const vBlock = document.getElementById('hud-vehicle-block');
   if (level.vehicle) {
