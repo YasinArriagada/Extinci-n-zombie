@@ -187,6 +187,7 @@ const MUSIC = new Audio();
 MUSIC.loop = true;
 MUSIC.volume = GAME.settings.music / 100;
 let musicStarted = false;
+let LOW_FX = false; // teléfonos/tablets: sin brillos (shadowBlur), es lo que más pesa al dibujar
 let currentMusicKey = null;
 
 // Arranca la música correspondiente a la etapa (si tiene una asignada en
@@ -333,8 +334,14 @@ function mpCreateRoom() {
         mpHostReceiveStageDone(conn.peer);
       }
       if (data.type === 'pos') {
+        // copia limpia ANTES de mpStoreRemote (que consume los disparos y agrega campos internos)
+        const relay = { ...data };
         mpStoreRemote(data);
-        MP.conns.forEach(c => { if (c !== conn && mpCanSend(c)) { try { c.send(data); } catch (e) { /* noop */ } } });
+        if (!MP._peerRelay) MP._peerRelay = {};
+        const prevRelay = MP._peerRelay[relay.id];
+        if (prevRelay && prevRelay.shots) relay.shots = relay.shots ? prevRelay.shots.concat(relay.shots) : prevRelay.shots;
+        relay._fresh = true;
+        MP._peerRelay[relay.id] = relay;
         // Etapa 2: este invitado está escoltando a un familiar, se actualiza
         // su posición en la copia del Admin (que es la que se reenvía).
         if (data.ownedNpc) {
@@ -399,6 +406,7 @@ function mpCreateRoom() {
       MP.players = MP.players.filter(p => p.id !== conn.peer);
       MP.conns = MP.conns.filter(c => c !== conn);
       delete MP.remoteStates[conn.peer];
+      if (MP._peerRelay) delete MP._peerRelay[conn.peer];
       mpBroadcastPlayerList();
     });
   });
@@ -450,12 +458,13 @@ function mpJoinRoom(code) {
       if (data.type === 'zombies') {
         const level = GAME.level;
         if (level) {
-          level.zombies = mpMergeSmooth(level.zombies, data.list);
+          const ZT = ['walker', 'gunner', 'rider'];
+          level.zombies = mpMergeSmooth(level.zombies, data.list.map(a => ({ id: a[0], x: a[1], y: a[2], angle: a[3] / 100, type: ZT[a[4]], hp: a[5], maxHp: a[6], hit: a[7] ? 0.12 : 0 })));
           GAME.run.kills = data.kills; GAME.run.totalKills = data.totalKills;
           level.killsThisStage = data.killsThisStage;
           // Se ven volar las balas enemigas (antes solo las veía el Admin);
           // acá solo se dibujan/mueven, el daño lo sigue resolviendo el Admin.
-          if (data.enemyBullets) level.enemyBullets = data.enemyBullets;
+          if (data.enemyBullets) level.enemyBullets = data.enemyBullets.map(a => ({ x: a[0], y: a[1], vx: a[2], vy: a[3], life: a[4] / 100 }));
         }
       }
       if (data.type === 'enemies') {
@@ -515,10 +524,12 @@ function mpJoinRoom(code) {
       if (data.type === 'final-victory') { showFinalVictory(); }
     };
     conn.on('data', data => {
+      if (data.type === 'bj') { try { data = JSON.parse(data.j); } catch (err) { return; } }
       if (data.type === 'batch') {
         if (data.seq !== undefined) { if (data.seq <= (MP._lastSeq || 0)) return; MP._lastSeq = data.seq; }
         if (data.sid !== undefined && (!GAME.level || GAME.level.stage.id !== data.sid)) return;
         for (const m of data.msgs) { try { handleHostData(m); } catch (err) { console.error('mp msg error', err); } }
+        if (data.peers) for (const m of data.peers) { try { handleHostData(m); } catch (err) { console.error('mp msg error', err); } }
       } else { try { handleHostData(data); } catch (err) { console.error('mp msg error', err); } }
     });
     conn.on('error', () => { mpShowJoinError('No se pudo conectar. Revisá el código.'); mpLeaveRoom(); });
@@ -744,19 +755,23 @@ function mpSendMyStateNow(level) {
 
 function mpBroadcastMyState(level, dt) {
   MP._sendAcc = (MP._sendAcc || 0) + dt;
-  if (MP._sendAcc < 0.05) return; // ~20 veces por segundo (el cliente interpola, se ve fluido)
+  // 20 envíos/s con 2 jugadores; menos a medida que hay más gente, para que la
+  // red de los teléfonos (y el Admin, que manda a todos) no se sature.
+  const nPl = MP.players ? MP.players.length : 2;
+  const interval = nPl <= 2 ? 0.05 : nPl === 3 ? 0.06 : nPl === 4 ? 0.07 : 0.08;
+  if (MP._sendAcc < interval) return;
   MP._sendAcc = 0;
   const payload = mpBuildPosPayload(level);
   if (MP.isHost) {
     const zPayload = {
       type: 'zombies', sid: level.stage.id,
-      list: level.zombies.map(z => ({ id: z.id, x: Math.round(z.x), y: Math.round(z.y), angle: +z.angle.toFixed(2), type: z.type, hp: z.hp, maxHp: z.maxHp, hit: z.hit })),
+      list: level.zombies.map(z => [z.id, Math.round(z.x), Math.round(z.y), Math.round(z.angle * 100), z.type === 'gunner' ? 1 : z.type === 'rider' ? 2 : 0, Math.round(z.hp), z.maxHp, z.hit > 0 ? 1 : 0]),
       kills: GAME.run.kills, totalKills: GAME.run.totalKills, killsThisStage: level.killsThisStage,
       // Balas de zombies/helicópteros/jefe: se mandan para que TODOS vean
       // que le están disparando a quien sea (no solo al Admin). No se manda
       // el targetRef: solo el Admin aplica el daño real (ver updateBullets),
       // el resto únicamente las dibuja volar.
-      enemyBullets: level.enemyBullets.slice(-160).map(b => ({ x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy), life: +b.life.toFixed(2) })),
+      enemyBullets: level.enemyBullets.slice(-160).map(b => [Math.round(b.x), Math.round(b.y), Math.round(b.vx), Math.round(b.vy), Math.round(b.life * 100)]),
     };
     MP._tick = (MP._tick || 0) + 1;
     const msgs = MP._tick % 2 === 0 ? [payload, zPayload, mpBuildEnemiesPayload(level)] : [payload, mpBuildEnemiesPayload(level)];
@@ -765,7 +780,15 @@ function mpBroadcastMyState(level, dt) {
     // seq: los invitados descartan paquetes viejos que lleguen desordenados.
     // sid: etapa a la que pertenece el estado (nunca se mezcla con otra etapa).
     const batch = { type: 'batch', seq: (MP._batchSeq = (MP._batchSeq || 0) + 1), sid: level.stage.id, msgs };
-    MP.conns.forEach(c => { if (mpCanSend(c)) { try { c.send(batch); } catch (e) { /* noop */ } } });
+    // posiciones frescas de los invitados: el Admin las junta en el mismo paquete
+    // (antes reenviaba cada mensaje por separado a todos: con 5 jugadores eran cientos por segundo)
+    if (MP._peerRelay) {
+      const fresh = Object.values(MP._peerRelay).filter(r => r._fresh);
+      if (fresh.length) batch.peers = fresh.map(r => { const o = { ...r }; delete o._fresh; return o; });
+      Object.values(MP._peerRelay).forEach(r => { r._fresh = false; r.shots = null; });
+    }
+    const wire = { type: 'bj', j: JSON.stringify(batch) };
+    MP.conns.forEach(c => { if (mpCanSend(c)) { try { c.send(wire); } catch (e) { /* noop */ } } });
   } else if (MP.hostConn) {
     try { MP.hostConn.send(payload); } catch (e) { /* noop */ }
   }
@@ -779,15 +802,15 @@ function mpBuildEnemiesPayload(level) {
   const potionPk = level.pickups.find(pk => pk.kind === 'potion');
   return {
     type: 'enemies', sid: level.stage.id,
-    heli: level.heli ? { x: level.heli.x, y: level.heli.y, hp: level.heli.hp, maxHp: level.heli.maxHp, isBoss: level.heli.isBoss, active: level.heli.active, shielded: level.heli.shielded, hit: level.heli.hit } : null,
-    miniPlanes: level.miniPlanes ? level.miniPlanes.map(m => ({ id: m.id, x: m.x, y: m.y, angle: m.angle, hp: m.hp, maxHp: m.maxHp, hit: m.hit, alive: true })) : null,
-    boss: level.boss ? { x: level.boss.x, y: level.boss.y, angle: level.boss.angle, hp: level.boss.hp, maxHp: level.boss.maxHp, active: level.boss.active, defeated: level.boss.defeated, coreDefeated: level.boss.coreDefeated, invulnerable: level.boss.invulnerable, phase: level.boss.phase, hit: level.boss.hit, big: level.boss.big, scale: level.boss.scale } : null,
-    miniRobots: level.miniRobots ? level.miniRobots.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), angle: +m.angle.toFixed(2), hp: m.hp, maxHp: m.maxHp, hit: m.hit, alive: true })) : null,
+    heli: level.heli ? { x: Math.round(level.heli.x), y: Math.round(level.heli.y), hp: Math.round(level.heli.hp), maxHp: level.heli.maxHp, isBoss: level.heli.isBoss, active: level.heli.active, shielded: level.heli.shielded, hit: level.heli.hit } : null,
+    miniPlanes: level.miniPlanes ? level.miniPlanes.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), angle: +m.angle.toFixed(2), hp: Math.round(m.hp), maxHp: m.maxHp, hit: m.hit > 0 ? 0.12 : 0, alive: true })) : null,
+    boss: level.boss ? { x: Math.round(level.boss.x), y: Math.round(level.boss.y), angle: +level.boss.angle.toFixed(2), hp: Math.round(level.boss.hp), maxHp: level.boss.maxHp, active: level.boss.active, defeated: level.boss.defeated, coreDefeated: level.boss.coreDefeated, invulnerable: level.boss.invulnerable, phase: level.boss.phase, hit: level.boss.hit, big: level.boss.big, scale: level.boss.scale } : null,
+    miniRobots: level.miniRobots ? level.miniRobots.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), angle: +m.angle.toFixed(2), hp: Math.round(m.hp), maxHp: m.maxHp, hit: m.hit > 0 ? 0.12 : 0, alive: true })) : null,
     airBossDone: level.airBossDone || false,
     // Batalla definitiva: fase (1 = helicóptero + robot, 2 = nave) y el tercer jefe.
     finalPhase: level.finalPhase || 0,
-    ship: level.ship ? { x: level.ship.x, y: level.ship.y, angle: level.ship.angle, hp: level.ship.hp, maxHp: level.ship.maxHp, phase: level.ship.phase, entering: level.ship.entering, invulnerable: level.ship.invulnerable, defeated: level.ship.defeated, hit: level.ship.hit } : null,
-    ship2: level.ship2 ? { x: level.ship2.x, y: level.ship2.y, angle: level.ship2.angle, hp: level.ship2.hp, maxHp: level.ship2.maxHp, phase: level.ship2.phase, entering: level.ship2.entering, invulnerable: level.ship2.invulnerable, defeated: level.ship2.defeated, hit: level.ship2.hit } : null,
+    ship: level.ship ? { x: Math.round(level.ship.x), y: Math.round(level.ship.y), angle: +level.ship.angle.toFixed(2), hp: Math.round(level.ship.hp), maxHp: level.ship.maxHp, phase: level.ship.phase, entering: level.ship.entering, invulnerable: level.ship.invulnerable, defeated: level.ship.defeated, hit: level.ship.hit } : null,
+    ship2: level.ship2 ? { x: Math.round(level.ship2.x), y: Math.round(level.ship2.y), angle: +level.ship2.angle.toFixed(2), hp: Math.round(level.ship2.hp), maxHp: level.ship2.maxHp, phase: level.ship2.phase, entering: level.ship2.entering, invulnerable: level.ship2.invulnerable, defeated: level.ship2.defeated, hit: level.ship2.hit } : null,
     // Etapa 3: la poción que suelta el jefe helicóptero, quién puede
     // agarrarla (más vida) y quién ya la tiene en mano.
     potion: potionPk ? { x: potionPk.x, y: potionPk.y, taken: potionPk.taken } : null,
@@ -1367,7 +1390,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
     ctx.strokeStyle = mpColor;
     ctx.lineWidth = 4;
     ctx.shadowColor = mpColor;
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = LOW_FX ? 0 : 10;
     ctx.beginPath(); ctx.arc(0, 0, 40, 0, Math.PI * 2); ctx.stroke();
     ctx.shadowBlur = 0;
   }
@@ -1475,7 +1498,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
 function drawCompanion(ctx, x, y, comp, scale) {
   ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
   ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, 11, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.shadowColor = comp.color; ctx.shadowBlur = 10;
+  ctx.shadowColor = comp.color; ctx.shadowBlur = LOW_FX ? 0 : 10;
   ctx.fillStyle = comp.color;
   ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
   ctx.shadowBlur = 0;
@@ -1487,7 +1510,7 @@ function drawCompanion(ctx, x, y, comp, scale) {
 function drawWeaponIcon(ctx, x, y, w) {
   ctx.save(); ctx.translate(x, y);
   ctx.strokeStyle = w.color; ctx.lineWidth = 6; ctx.lineCap = 'round';
-  ctx.shadowColor = w.color; ctx.shadowBlur = 8;
+  ctx.shadowColor = w.color; ctx.shadowBlur = LOW_FX ? 0 : 8;
   ctx.beginPath(); ctx.moveTo(-30, 6); ctx.lineTo(30, -6); ctx.stroke();
   ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-6, 2); ctx.lineTo(-10, 16); ctx.stroke();
   ctx.restore();
@@ -1535,7 +1558,7 @@ function drawBoss(ctx, x, y, hpPct, hit, scale, invulnerable) {
   ctx.fillStyle = c; ctx.fillRect(-34, -34, 68, 68);
   ctx.fillStyle = '#2c2f28'; ctx.fillRect(-34, -34, 68, 14);
   ctx.fillStyle = hpPct > 0.5 ? '#9dfb4c' : hpPct > 0.2 ? '#e0b13f' : '#d1272d';
-  ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
+  ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = LOW_FX ? 0 : 12;
   ctx.beginPath(); ctx.arc(-14, -10, 6, 0, Math.PI * 2); ctx.arc(14, -10, 6, 0, Math.PI * 2); ctx.fill();
   ctx.shadowBlur = 0;
   ctx.strokeStyle = '#111'; ctx.lineWidth = 3;
@@ -1549,7 +1572,7 @@ function drawPickup(ctx, x, y, kind, color) {
   ctx.save(); ctx.translate(x, y);
   const bob = Math.sin(Date.now() / 260 + x) * 3;
   ctx.translate(0, bob);
-  ctx.shadowColor = color; ctx.shadowBlur = 14;
+  ctx.shadowColor = color; ctx.shadowBlur = LOW_FX ? 0 : 14;
   ctx.fillStyle = color;
   if (kind === 'coin') { ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill(); }
   else if (kind === 'potion') {
@@ -1996,6 +2019,7 @@ function setupInput() {
   // y activa los controles táctiles por defecto, sin que el jugador tenga
   // que ir a buscar la opción en Configuración.
   const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  LOW_FX = isTouchDevice;
   if (isTouchDevice) {
     GAME.settings.touch = true;
     document.getElementById('opt-touch').checked = true;
@@ -3259,7 +3283,7 @@ function drawShip(ctx, x, y, hpPct, hit, t, invulnerable, wreck, elite) {
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2 + t * 2;
     ctx.fillStyle = wreck ? '#2a2a2a' : lc;
-    if (!wreck) { ctx.shadowColor = lc; ctx.shadowBlur = 10; }
+    if (!wreck) { ctx.shadowColor = lc; ctx.shadowBlur = LOW_FX ? 0 : 10; }
     ctx.beginPath(); ctx.arc(Math.cos(a) * 50, 5 + Math.sin(a) * 9, 4, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
   }
@@ -3420,7 +3444,7 @@ function render() {
   ctx.translate(-camX, -camY);
 
   drawGroundGrid(ctx, camX, camY, vw, vh);
-  drawDecor(ctx, level);
+  drawDecor(ctx, level, camX, camY, vw, vh);
   drawSafeZone(ctx, level);
 
   if (level.stage.resource) level.pickups.forEach(pk => { if (!pk.taken && pk.kind === 'resource') drawPickup(ctx, pk.x, pk.y, 'resource', level.stage.resource.color); });
@@ -3429,19 +3453,21 @@ function render() {
   if (level.stage.objectiveType === 'rescue') level.survivors.forEach(s => { if (!s.rescued) drawSurvivor(ctx, s.x, s.y); });
   level.npcs.forEach(n => { if (!n.delivered) drawFamilyMember(ctx, n.x, n.y, n.kind); });
 
-  level.zombies.forEach(z => { if (z.type === 'rider') drawRiderZombie(ctx, z.x, z.y, z.angle); else drawZombie(ctx, z.x, z.y, z.angle, z.type, z.hit); });
+  const inView = (x, y, m) => x > camX - m && x < camX + vw + m && y > camY - m && y < camY + vh + m;
+  level.zombies.forEach(z => { if (!inView(z.x, z.y, 60)) return; if (z.type === 'rider') drawRiderZombie(ctx, z.x, z.y, z.angle); else drawZombie(ctx, z.x, z.y, z.angle, z.type, z.hit); });
 
   if (level.heli && level.heli.active) drawHeli(ctx, level.heli.x, level.heli.y, level.time, level.heli.hit, level.heli.isBoss, level.heli.shielded);
-  if (level.miniPlanes) level.miniPlanes.forEach(m => { if (m.alive) drawHeli(ctx, m.x, m.y, level.time, m.hit, false); });
+  if (level.miniPlanes) level.miniPlanes.forEach(m => { if (m.alive && inView(m.x, m.y, 80)) drawHeli(ctx, m.x, m.y, level.time, m.hit, false); });
   if (level.boss && level.boss.active && !level.boss.defeated) drawBoss(ctx, level.boss.x, level.boss.y, level.boss.hp / level.boss.maxHp, level.boss.hit || 0, level.boss.scale || 1, level.boss.invulnerable);
-  if (level.miniRobots && level.boss && level.boss.active && !level.boss.defeated) level.miniRobots.forEach(m => drawBoss(ctx, m.x, m.y, m.hp / m.maxHp, m.hit, level.boss.big ? 0.55 : 0.42));
+  if (level.miniRobots && level.boss && level.boss.active && !level.boss.defeated) level.miniRobots.forEach(m => { if (inView(m.x, m.y, 80)) drawBoss(ctx, m.x, m.y, m.hp / m.maxHp, m.hit, level.boss.big ? 0.55 : 0.42); });
   if (level.ship && !level.ship.defeated) drawShip(ctx, level.ship.x, level.ship.y, level.ship.hp / level.ship.maxHp, level.ship.hit || 0, level.time, level.ship.invulnerable, false, false);
   if (level.ship2 && !level.ship2.defeated) drawShip(ctx, level.ship2.x, level.ship2.y, level.ship2.hp / level.ship2.maxHp, level.ship2.hit || 0, level.time, level.ship2.invulnerable, false, true);
 
-  level.bullets.forEach(b => { ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
-  (level.remoteBullets || []).forEach(b => { ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
-  level.enemyBullets.forEach(b => { ctx.fillStyle = '#d1272d'; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); });
+  level.bullets.forEach(b => { if (!inView(b.x, b.y, 20)) return; ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
+  (level.remoteBullets || []).forEach(b => { if (!inView(b.x, b.y, 20)) return; ctx.fillStyle = b.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); });
+  level.enemyBullets.forEach(b => { if (!inView(b.x, b.y, 20)) return; ctx.fillStyle = '#d1272d'; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); });
   level.particles.forEach(p => {
+    if (!inView(p.x, p.y, 100)) return;
     ctx.globalAlpha = clamp(p.life / 0.4, 0, 1);
     if (p.ring) { ctx.strokeStyle = p.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, 90 * (1 - p.life / 0.25), 0, Math.PI * 2); ctx.stroke(); }
     else { ctx.fillStyle = p.color; ctx.fillRect(p.x - 2, p.y - 2, 4, 4); }
@@ -3519,7 +3545,7 @@ function drawOffscreenIndicators(ctx, camX, camY, w, h, targets, color, label, z
     const ex = cx + Math.cos(angle) * scale, ey = cy + Math.sin(angle) * scale;
     ctx.save();
     ctx.translate(ex, ey); ctx.rotate(angle);
-    ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 8;
+    ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = LOW_FX ? 0 : 8;
     ctx.beginPath(); ctx.moveTo(11, 0); ctx.lineTo(-7, -8); ctx.lineTo(-7, 8); ctx.closePath(); ctx.fill();
     ctx.shadowBlur = 0;
     ctx.restore();
@@ -3540,8 +3566,9 @@ function drawGroundGrid(ctx, camX, camY, w, h) {
   ctx.strokeRect(0, 0, WORLD.w, WORLD.h);
 }
 
-function drawDecor(ctx, level) {
+function drawDecor(ctx, level, camX, camY, vw, vh) {
   level.decor.forEach(d => {
+    if (camX !== undefined && (d.x < camX - 140 || d.x > camX + vw + 140 || d.y < camY - 140 || d.y > camY + vh + 140)) return;
     ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.rot); ctx.scale(d.s, d.s);
     switch (d.kind) {
       case 'tree':
