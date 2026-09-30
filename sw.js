@@ -5,7 +5,7 @@
  *
  * Si agregas archivos nuevos al juego (música, imágenes), añádelos a CORE y sube CACHE_VERSION.
  */
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE = 'extincion-zombie-' + CACHE_VERSION;
 const CORE = [
   './', 'index.html', 'game.js', 'style.css', 'favicon.svg',
@@ -75,7 +75,7 @@ self.addEventListener('fetch', e => {
   if (url.origin !== self.location.origin) return;
 
   const key = keyFor(url);
-  const isCode = req.mode === 'navigate' || /\.(html|js|css)$/.test(url.pathname) || url.pathname.endsWith('/');
+  const isCode = req.mode === 'navigate' || /\.(html|js|css|json)$/.test(url.pathname) || url.pathname.endsWith('/');
   const isMedia = req.destination === 'audio' || req.destination === 'video' || /\.(mp3|ogg|wav|m4a)$/.test(url.pathname);
 
   e.respondWith((async () => {
