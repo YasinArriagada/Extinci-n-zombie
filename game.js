@@ -1306,6 +1306,7 @@ function showScreen(id) {
   // Botones VOLVER de la selección: solo aparecen si hay una pantalla anterior a la que regresar
   const setBack = (btnId, visible) => { const b = document.getElementById(btnId); if (b) b.style.display = visible ? '' : 'none'; };
   if (id === 'screen-character') setBack('btn-char-back', true); // ATRÁS siempre disponible (también en multijugador)
+  if (id === 'screen-character') { const nb = document.getElementById('btn-char-next'); if (nb) nb.disabled = !GAME.selection.character; } // CONTINUAR bloqueado hasta elegir personaje
   if (id === 'screen-vehicle') setBack('btn-vehicle-back', !!GAME.vehBack);
   if (id === 'screen-weapons') setBack('btn-weapons-back', !!GAME.weaponsBack);
 }

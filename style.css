@@ -156,7 +156,7 @@ html,body{
 
 .btn:hover{ border-color: var(--toxic); color: var(--toxic); box-shadow: 0 0 16px var(--glow); transform: translateY(-1px); }
 .btn:active{ transform: translateY(1px); }
-.btn:disabled{ opacity:0.35; cursor:not-allowed; }
+.btn:disabled{ opacity:0.35; cursor:not-allowed; filter:grayscale(1); pointer-events:none; }
 .btn:disabled:hover{ border-color: var(--steel-light); color: var(--bone); box-shadow:none; }
 
 .btn-primary{ border-color: var(--toxic-dim); color: var(--toxic); background: linear-gradient(180deg, #182a12, #0e150c); }
