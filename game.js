@@ -1908,6 +1908,57 @@ function stepVisualHeading(A, face, t, tF) {
   A.turn = (A.turn || 0) + (d - (A.turn || 0)) * 0.3;
 }
 
+/* ---- Velocirraptor con imágenes (Aspectos/raptor-*.png): una vista por dirección ---- */
+const RAPTOR_K = 0.25; // píxeles del juego por píxel de imagen
+// cx,cy = punto de la imagen que queda en el centro de la montura; sx,sy = donde va sentado el jinete (la silla)
+const RAPTOR_VIEWS = {
+  izquierda: { src: 'Aspectos/raptor-izquierda.png', w: 354, h: 189, cx: 177, cy: 100, sx: 147, sy: 50 },
+  derecha:   { src: 'Aspectos/raptor-derecha.png',   w: 344, h: 188, cx: 172, cy: 100, sx: 203, sy: 50 },
+  arriba:    { src: 'Aspectos/raptor-arriba.png',    w: 90,  h: 234, cx: 45,  cy: 117, sx: 45,  sy: 66 },
+  abajo:     { src: 'Aspectos/raptor-abajo.png',     w: 98,  h: 234, cx: 49,  cy: 117, sx: 49,  sy: 55 },
+};
+const RAPTOR_IMGS = {};
+function raptorImg(name) {
+  let i = RAPTOR_IMGS[name];
+  if (!i) { i = RAPTOR_IMGS[name] = new Image(); i.src = RAPTOR_VIEWS[name].src; }
+  return (i.complete && i.naturalWidth > 0) ? i : null;
+}
+Object.keys(RAPTOR_VIEWS).forEach(raptorImg); // precarga
+
+// Dibuja la montura-raptor (y a su jinete sentado en la silla). Devuelve false si las imágenes aún no cargaron.
+function drawRaptorMount(ctx, A, aDefault, rider) {
+  const Fv = A.F === undefined ? 1 : A.F, Fs = Fv < 0 ? -1 : 1;
+  const aT = A.th !== undefined ? (A.dir > 0 ? A.th : Math.PI - A.th) : aDefault; // hacia dónde mira
+  const sA = Math.sin(aT);
+  const vert = (A.rv === 'v') ? Math.abs(sA) > 0.62 : Math.abs(sA) > 0.78; // vista de arriba/abajo solo si va casi vertical
+  A.rv = vert ? 'v' : 's';
+  const name = vert ? (sA < 0 ? 'arriba' : 'abajo') : (Fs > 0 ? 'derecha' : 'izquierda');
+  const img = raptorImg(name);
+  if (!img) return false;
+  const d = RAPTOR_VIEWS[name], K = RAPTOR_K;
+  const sp = A.sp || 0, sw = Math.sin(A.ph || 0);
+  const bob = Math.sin(Date.now() / 420) * 0.7 * (1 - sp) - Math.abs(sw) * sp * 1.2;
+  const sqz = vert ? 1 : (Math.abs(Fv) < 1 ? Math.max(Math.abs(Fv), 0.25) : 1); // al cambiar de lado se voltea de golpe, sin girar por abajo
+  ctx.save();
+  ctx.translate(0, bob);
+  if (!vert) ctx.rotate(sw * 0.03 * sp); // leve balanceo al correr
+  // sombra en el suelo
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  if (vert) ctx.ellipse(2, 4, 13, 26, 0, 0, Math.PI * 2); else ctx.ellipse(0, (d.h - d.cy) * K - 2, 36 * sqz, 6.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.save(); ctx.scale(sqz, 1); ctx.drawImage(img, -d.cx * K, -d.cy * K, d.w * K, d.h * K); ctx.restore();
+  if (rider) {
+    ctx.save();
+    ctx.translate((d.sx - d.cx) * K * sqz, (d.sy - d.cy) * K + 2);
+    if (!charImage(rider.id)) ctx.rotate(rider.aimAngle); // sin imagen del personaje: el dibujo simple apunta con la rotación
+    drawRiderFigure(ctx, rider.color, rider.accent, rider.id, clamp((A.turn || 0) * 0.2, -0.14, 0.14), Math.abs(Fv) < 0.6 ? Fs * 0.6 : Fv, rider.aimAngle);
+    ctx.restore();
+  }
+  ctx.restore();
+  return true;
+}
+
 function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   ctx.save();
   ctx.translate(x, y);
@@ -1929,6 +1980,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   const Fs = Fv < 0 ? -1 : 1;
   const aTrue = Fs > 0 ? thv : Math.PI - thv;       // hacia dónde mira realmente la montura
   const m0 = ctx.getTransform(); CUR_Z = Math.hypot(m0.a, m0.b);
+  if (v.id === 'raptor' && drawRaptorMount(ctx, A, angle, rider)) { CUR_Z = null; ctx.restore(); return; }
   ctx.save();
   ctx.scale(Math.abs(Fv) < 0.25 ? Fs * 0.25 : Fv, 1); // al voltearse se angosta un instante, nunca desaparece
   ctx.rotate(thv);
