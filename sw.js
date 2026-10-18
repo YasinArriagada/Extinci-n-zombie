@@ -10,7 +10,7 @@ const CACHE_VERSION = 'v7';
 const CACHE = 'extincion-zombie-' + CACHE_VERSION;
 const CORE = [
   './', 'index.html', 'game.js', 'style.css', 'favicon.svg',
-  'Menu.mp3', 'Avion.mp3', 'Music_robot.mp3', 'Modo_Especial.mp3', 'mementomori.jpeg', 'yo.jpeg',
+  'Menu.mp3', 'Avion.mp3', 'Music_robot.mp3', 'Modo Especial.mp3', 'mementomori.jpeg', 'yo.jpeg',
   'manifest.json', 'icon-192 (1).png', 'icon-512 (1).png', 'icon-512-maskable.png',
 ];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
