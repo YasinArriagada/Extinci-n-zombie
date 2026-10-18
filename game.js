@@ -1788,7 +1788,7 @@ function drawHuman(ctx, x, y, angle, bodyColor, accent, scale, charId) {
   if (charImage(charId)) {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.beginPath(); ctx.ellipse(0, 15, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
-    drawChibiUpright(ctx, charId, 40, 17);
+    drawChibiUpright(ctx, charId, 50, 19);
     // arma apuntando hacia donde se dispara
     ctx.rotate(angle);
     ctx.strokeStyle = '#20241c'; ctx.lineWidth = 3; ctx.lineCap = 'round';
@@ -1861,11 +1861,11 @@ function drawSeatShade(ctx, y, rx, ry) {
 function drawRiderFigure(ctx, bodyColor, accent, charId, tilt, sx) {
   ctx.save();
   if (charImage(charId)) {
-    drawChibiUpright(ctx, charId, 30, 7, tilt, sx, 0.3);
-    drawSeatShade(ctx, -2, 8, 2.8);
+    drawChibiUpright(ctx, charId, 38, 9, tilt, sx, 0.3);
+    drawSeatShade(ctx, -2, 9.5, 3.2);
     // arma en las manos, a la altura del pecho, apuntando hacia donde se dispara
     const m = ctx.getTransform(), rot = Math.atan2(m.b, m.a);
-    ctx.rotate(-rot); ctx.translate(0, -10); ctx.rotate(rot);
+    ctx.rotate(-rot); ctx.translate(0, -13); ctx.rotate(rot);
     ctx.strokeStyle = '#20241c'; ctx.lineWidth = 3; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(17, 0); ctx.stroke();
     ctx.restore();
@@ -2012,7 +2012,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
         ctx.fillStyle = rider.accent; ctx.beginPath(); ctx.arc(-3, -3, 1.8, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
-      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 26, 6, lean, faceOf('t', rider.aimAngle), 0.3); drawSeatShade(ctx, -1.5, 7, 2.6); ctx.restore(); }
+      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 33, 8, lean, faceOf('t', rider.aimAngle), 0.3); drawSeatShade(ctx, -1.5, 8.5, 3); ctx.restore(); }
     } else if (riderSpot) {
       ctx.save();
       ctx.translate(riderSpot.dx, riderSpot.dy);
