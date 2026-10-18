@@ -216,8 +216,15 @@ function startBossMusic(stageKey) {
   }
   musicStarted = true;
   MUSIC.currentTime = 0;
-  MUSIC.play().catch(() => { /* algunos navegadores requieren un gesto previo del usuario */ });
+  MUSIC.play().catch(() => {
+    // el navegador bloqueó el audio (necesita un gesto): se reintenta en el próximo toque/tecla
+    const retry = () => { if (musicStarted && MUSIC.paused) MUSIC.play().catch(() => {}); };
+    window.addEventListener('pointerdown', retry, { once: true });
+    window.addEventListener('keydown', retry, { once: true });
+  });
 }
+// Si el archivo de música no se encuentra o no se puede decodificar, se avisa en la consola (F12)
+MUSIC.addEventListener('error', () => console.warn('[música] No se pudo cargar: ' + MUSIC.src + ' — revisa que el archivo esté en la misma carpeta que index.html y que el nombre coincida exactamente.'));
 
 function stopBossMusic() {
   musicStarted = false;
