@@ -1257,12 +1257,16 @@ function mpDrawRemotePlayers(ctx) {
     if (dist(s.rx, s.ry, s.x, s.y) > 300) { s.rx = s.x; s.ry = s.y; }
     else { s.rx += (s.x - s.rx) * k; s.ry += (s.y - s.ry) * k; }
     s.ra = lerpAngle(s.ra, s.angle, k);
+    { const mv = Math.hypot(s.rx - (s._lx === undefined ? s.rx : s._lx), s.ry - (s._ly === undefined ? s.ry : s._ly));
+      s._lx = s.rx; s._ly = s.ry;
+      s._sp = (s._sp || 0) + ((mv > 0.15 ? 1 : 0) - (s._sp || 0)) * 0.2;
+      s._ph = (s._ph || 0) + mv * 0.16; } // animación de los demás jugadores según lo que se mueven en pantalla
     s.rAim = lerpAngle(s.rAim, s.aimAngle !== undefined ? s.aimAngle : s.angle, k);
     ctx.save();
     if (s.dead) ctx.globalAlpha = 0.35; // cuerpo apagado para el jugador eliminado
     if (s.vehicleDef) {
       const remoteRider = { id: s.charId, color: s.charColor, accent: s.charAccent, aimAngle: s.rAim };
-      drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider);
+      drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider, { ph: s._ph || 0, sp: s._sp || 0 });
     }
     else drawHuman(ctx, s.rx, s.ry, s.ra, s.charColor, s.charAccent, 1, s.charId);
     ctx.restore();
@@ -1759,13 +1763,14 @@ function charImage(id) {
 }
 CHARACTERS.forEach(c => charImage(c.id)); // precarga
 // Dibuja el personaje siempre derecho (sin girar con la montura): bottomY = donde apoyan los pies, h = alto.
-function drawChibiUpright(ctx, charId, h, bottomY) {
+function drawChibiUpright(ctx, charId, h, bottomY, tilt) {
   const img = charImage(charId);
   if (!img) return false;
   const m = ctx.getTransform();
   ctx.save();
   ctx.rotate(-Math.atan2(m.b, m.a));
   const w = h * img.naturalWidth / img.naturalHeight;
+  if (tilt) { ctx.translate(0, bottomY); ctx.rotate(tilt); ctx.translate(0, -bottomY); } // se balancea desde los pies
   ctx.drawImage(img, -w / 2, bottomY - h, w, h);
   ctx.restore();
   return true;
@@ -1839,12 +1844,12 @@ function drawRiderZombie(ctx, x, y, angle) {
 // Dibuja al personaje (el que elegiste: hombre o mujer) montado/asomado en el
 // vehículo. Se llama ya posicionado y rotado en el punto donde debe ir sentado;
 // su propia rotación local ya viene alineada con la dirección de puntería.
-function drawRiderFigure(ctx, bodyColor, accent, charId) {
+function drawRiderFigure(ctx, bodyColor, accent, charId, tilt) {
   ctx.save();
   if (charImage(charId)) {
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.beginPath(); ctx.ellipse(0, 5, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
-    drawChibiUpright(ctx, charId, 30, 7);
+    drawChibiUpright(ctx, charId, 30, 7, tilt);
     ctx.strokeStyle = '#20241c'; ctx.lineWidth = 3; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(18, 0); ctx.stroke();
     ctx.restore();
@@ -1867,7 +1872,7 @@ function drawRiderFigure(ctx, bodyColor, accent, charId) {
   ctx.restore();
 }
 
-function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
+function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
@@ -1886,6 +1891,13 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(0, 16, 26, 8, 0, 0, Math.PI * 2); ctx.fill();
   const [c1, c2] = v.pal;
+  // Animación de marcha: A.ph = fase del paso (avanza con la distancia recorrida), A.sp = 0 parado .. 1 en marcha.
+  const A = anim || { ph: 0, sp: 0 };
+  const sp = A.sp || 0, sw = Math.sin(A.ph);
+  const idle = Math.sin(Date.now() / 420) * 0.7 * (1 - sp); // respiración al estar quieto
+  const bobAmt = idle - Math.abs(sw) * sp * (v.kind === 'tank' ? 0.8 : v.kind === 'ball' ? 1.4 : 3); // rebote vertical (en pantalla)
+  const swing = sw * 5 * sp; // balanceo de patas
+  ctx.translate(Math.sin(angle) * bobAmt, Math.cos(angle) * bobAmt); // el rebote siempre es vertical en pantalla
   let riderSpot = null; // posición local (dentro del casco) donde va sentado el personaje
   switch (v.kind) {
     case 'dino':
@@ -1897,7 +1909,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
       ctx.fillStyle = '#d1272d';
       ctx.beginPath(); ctx.arc(28, -10, 1.6, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = c1; ctx.lineWidth = 5; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(-24, 4); ctx.lineTo(-24, 16); ctx.moveTo(-8, 6); ctx.lineTo(-8, 18); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-24, 4); ctx.lineTo(-24 + swing, 16); ctx.moveTo(-8, 6); ctx.lineTo(-8 - swing, 18); ctx.stroke();
       riderSpot = { dx: -2, dy: -9 };
       break;
     case 'tank':
@@ -1906,7 +1918,10 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
       ctx.fillStyle = c2; ctx.fillRect(-26, -14, 52, 28);
       ctx.fillStyle = c1; ctx.fillRect(-22, -10, 44, 20);
       ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
-      for (let i = -20; i <= 20; i += 8) { ctx.beginPath(); ctx.arc(i, -16, 4, 0, Math.PI * 2); ctx.arc(i, 16, 4, 0, Math.PI * 2); ctx.stroke(); }
+      const tr = (A.ph * 4) % 8; // las orugas avanzan al moverse
+      ctx.save(); ctx.beginPath(); ctx.rect(-26, -22, 52, 44); ctx.clip();
+      for (let i = -28; i <= 28; i += 8) { ctx.beginPath(); ctx.arc(i + tr, -16, 4, 0, Math.PI * 2); ctx.arc(i + tr, 16, 4, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.restore();
       if (!rider) {
         // Vista previa (menú de selección): sin jugador aún, torreta fija al frente.
         ctx.fillStyle = c1; ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
@@ -1919,13 +1934,14 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
       ctx.quadraticCurveTo(20, 12, -28, 10); ctx.fill();
       ctx.fillStyle = c2; ctx.fillRect(-24, 6, 48, 6);
       ctx.strokeStyle = c2; ctx.lineWidth = 4; ctx.lineCap = 'round';
-      for (let i = -18; i <= 14; i += 12) { ctx.beginPath(); ctx.moveTo(i, 10); ctx.lineTo(i - 3, 20); ctx.stroke(); }
+      let k = 0; for (let i = -18; i <= 14; i += 12, k++) { const sg = (k % 2 ? -swing : swing); ctx.beginPath(); ctx.moveTo(i, 10); ctx.lineTo(i - 3 + sg, 20); ctx.stroke(); }
       riderSpot = { dx: 0, dy: -15 };
       break;
     case 'ball':
       ctx.fillStyle = c1; ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = c2; ctx.lineWidth = 2;
-      for (let a = 0; a < 6; a++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * 18, Math.sin(a) * 18); ctx.stroke(); }
+      const roll = A.ph * 0.9; // la pelota rueda al avanzar
+      for (let a = 0; a < 6; a++) { ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a + roll) * 18, Math.sin(a + roll) * 18); ctx.stroke(); }
       ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.stroke();
       riderSpot = { dx: 0, dy: -17 };
       break;
@@ -1934,14 +1950,14 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
       ctx.strokeStyle = c2; ctx.lineWidth = 2; ctx.strokeRect(-26, -12, 52, 24);
       ctx.fillStyle = c2; ctx.fillRect(-4, -12, 8, 24);
       ctx.strokeStyle = '#e0b13f'; ctx.lineWidth = 4; ctx.lineCap = 'round';
-      for (let i = -20; i <= 20; i += 10) { ctx.beginPath(); ctx.moveTo(i, 12); ctx.lineTo(i, 22); ctx.stroke(); }
+      let kc = 0; for (let i = -20; i <= 20; i += 10, kc++) { const sg = (kc % 2 ? -swing : swing) * 0.8; ctx.beginPath(); ctx.moveTo(i, 12); ctx.lineTo(i + sg, 22); ctx.stroke(); }
       riderSpot = { dx: 0, dy: -16 };
       break;
     case 'horse':
       ctx.fillStyle = c1; ctx.beginPath(); ctx.ellipse(0, 0, 22, 11, 0, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.ellipse(22, -6, 8, 7, 0, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = c2; ctx.lineWidth = 5; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(-14, 8); ctx.lineTo(-14, 20); ctx.moveTo(10, 8); ctx.lineTo(10, 20); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-14, 8); ctx.lineTo(-14 + swing, 20); ctx.moveTo(-8, 8); ctx.lineTo(-8 - swing, 20); ctx.moveTo(6, 8); ctx.lineTo(6 - swing, 20); ctx.moveTo(10, 8); ctx.lineTo(10 + swing, 20); ctx.stroke();
       riderSpot = { dx: -4, dy: -9 };
       break;
     case 'cat2':
@@ -1969,14 +1985,17 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
         ctx.fillStyle = rider.accent; ctx.beginPath(); ctx.arc(-3, -3, 1.8, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
-      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 24, 4); ctx.restore(); }
+      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 24, 4, Math.sin(A.ph - 0.5) * 0.06 * sp); ctx.restore(); }
     } else if (riderSpot) {
       ctx.save();
       ctx.translate(riderSpot.dx, riderSpot.dy);
+      // el jinete rebota un poco desfasado de la montura (como si absorbiera el paso)
+      const rb = -Math.abs(Math.sin(A.ph - 0.9)) * sp * 1.6;
+      ctx.translate(Math.sin(angle) * rb, Math.cos(angle) * rb);
       // El personaje mantiene su lugar sobre la montura, pero su cuerpo/arma
       // se orienta hacia la puntería real (mouse), no hacia el movimiento.
       ctx.rotate(rider.aimAngle - angle);
-      drawRiderFigure(ctx, rider.color, rider.accent, rider.id);
+      drawRiderFigure(ctx, rider.color, rider.accent, rider.id, Math.sin(A.ph - 0.5) * 0.09 * sp);
       ctx.restore();
     }
   }
@@ -2703,10 +2722,17 @@ function updatePlayerMovement(level, dt) {
 function updateVehicle(level, dt) {
   const v = level.vehicle; if (!v) return;
   const p = level.player;
+  // distancia realmente recorrida este cuadro (para animar el paso a la velocidad real)
+  const moved = v._px === undefined ? 0 : Math.hypot(p.x - v._px, p.y - v._py);
+  v._px = p.x; v._py = p.y;
   v.x = p.x; v.y = p.y;
   const face = p.moveAngle || 0;
-  // solo se suaviza la rotación visual; la posición sigue al jugador sin retraso
-  v.angle = lerpAngle(v.angle, face, clamp(dt * 12, 0, 1));
+  // solo se suaviza la rotación visual; la posición sigue al jugador sin retraso.
+  // Las monturas pesadas (tanque) giran más lento que las ligeras (velocirraptor, pelota).
+  v.angle = lerpAngle(v.angle, face, clamp(dt * (5 + v.def.speed * 0.045), 0, 1));
+  if (!v.anim) v.anim = { ph: 0, sp: 0 };
+  v.anim.sp += ((moved > 0.15 ? 1 : 0) - v.anim.sp) * clamp(dt * 10, 0, 1);
+  v.anim.ph += moved * 0.16;
   p.speed = v.def.speed;
   if (v.hp <= 0) onVehicleDestroyed(level);
 }
@@ -4213,7 +4239,7 @@ function render() {
     const myRider = GAME.selection.character
       ? { id: GAME.selection.character.id, color: GAME.selection.character.color, accent: GAME.selection.character.accent, aimAngle: level.player.angle }
       : null;
-    drawVehicle(ctx, level.vehicle.x, level.vehicle.y, level.vehicle.angle, level.vehicle.def, 1, level.vehicle.mpColor, myRider);
+    drawVehicle(ctx, level.vehicle.x, level.vehicle.y, level.vehicle.angle, level.vehicle.def, 1, level.vehicle.mpColor, myRider, level.vehicle.anim);
   }
   else drawHuman(ctx, level.player.x, level.player.y, level.player.angle, GAME.selection.character.color, GAME.selection.character.accent, 1, GAME.selection.character.id);
   ctx.restore();
