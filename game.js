@@ -1268,7 +1268,7 @@ function mpDrawRemotePlayers(ctx) {
     if (s.dead) ctx.globalAlpha = 0.35; // cuerpo apagado para el jugador eliminado
     if (s.vehicleDef) {
       const remoteRider = { id: s.charId, color: s.charColor, accent: s.charAccent, aimAngle: s.rAim };
-      drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider, { ph: s._ph || 0, sp: s._sp || 0, turn: s._tn || 0 });
+      drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider, Object.assign(s._anim || (s._anim = {}), { ph: s._ph || 0, sp: s._sp || 0, turn: s._tn || 0 }));
     }
     else drawHuman(ctx, s.rx, s.ry, s.ra, s.charColor, s.charAccent, 1, s.charId);
     ctx.restore();
@@ -1914,6 +1914,16 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   const bobAmt = idle - Math.abs(sw) * sp * (v.kind === 'tank' ? 0.4 : v.kind === 'ball' ? 0.7 : 1.2); // rebote vertical (en pantalla)
   const swing = sw * 5 * sp; // balanceo de patas
   const lean = clamp((A.turn || 0) * 0.2, -0.14, 0.14); // el jinete se inclina suavemente al girar
+  // Hacia qué lado mira el jinete: solo izquierda o derecha. Al ir hacia arriba/abajo conserva el último lado
+  // (nunca desaparece), y al cambiar de lado se voltea con una animación corta, sin hacerse más angosto que un mínimo.
+  const faceOf = (key, ang) => {
+    const c = Math.cos(ang);
+    if (Math.abs(c) > 0.25 || A[key + 'D'] === undefined) A[key + 'D'] = c >= 0 ? 1 : -1;
+    const f = A[key + 'F'] === undefined ? A[key + 'D'] : A[key + 'F'];
+    A[key + 'F'] = f + (A[key + 'D'] - f) * 0.3;
+    const fv = A[key + 'F'];
+    return Math.abs(fv) < 0.6 ? (fv >= 0 ? 0.6 : -0.6) : fv;
+  };
   ctx.translate(Math.sin(angle) * bobAmt, Math.cos(angle) * bobAmt); // el rebote siempre es vertical en pantalla
   let riderSpot = null; // posición local (dentro del casco) donde va sentado el personaje
   switch (v.kind) {
@@ -2002,14 +2012,14 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
         ctx.fillStyle = rider.accent; ctx.beginPath(); ctx.arc(-3, -3, 1.8, 0, Math.PI * 2); ctx.fill();
       }
       ctx.restore();
-      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 26, 6, lean, clamp(Math.cos(rider.aimAngle) * 2, -1, 1), 0.3); drawSeatShade(ctx, -1.5, 7, 2.6); ctx.restore(); }
+      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 26, 6, lean, faceOf('t', rider.aimAngle), 0.3); drawSeatShade(ctx, -1.5, 7, 2.6); ctx.restore(); }
     } else if (riderSpot) {
       ctx.save();
       ctx.translate(riderSpot.dx, riderSpot.dy);
       // El personaje mantiene su lugar sobre la montura, pero su cuerpo/arma
       // se orienta hacia la puntería real (mouse), no hacia el movimiento.
       ctx.rotate(rider.aimAngle - angle);
-      drawRiderFigure(ctx, rider.color, rider.accent, rider.id, lean, clamp(Math.cos(angle) * 2, -1, 1));
+      drawRiderFigure(ctx, rider.color, rider.accent, rider.id, lean, faceOf('v', angle));
       ctx.restore();
     }
   }
