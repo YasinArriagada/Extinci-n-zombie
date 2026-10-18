@@ -1475,18 +1475,37 @@ function fullReset() {
 
 /* ---------------------------- SALTO DE FASE --------------------------------- */
 
+// Etapas superadas (se guardan en el dispositivo). El salto de fase solo deja elegir las que ya
+// se superaron jugando; el modo especial (special) siempre está disponible.
+const UNLOCK_KEY = 'ez_stages_cleared';
+function clearedStages() {
+  try { const a = JSON.parse(localStorage.getItem(UNLOCK_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+}
+function markStageCleared(stage) {
+  if (!stage || stage.special || stage.hidden) return;
+  const a = clearedStages();
+  if (a.includes(stage.id)) return;
+  a.push(stage.id);
+  try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(a)); } catch (e) { /* sin almacenamiento: no pasa nada */ }
+}
+function isStageUnlocked(stage) {
+  return !!stage.special || clearedStages().includes(stage.id);
+}
+
 function buildPhaseGrid() {
   const grid = document.getElementById('phase-grid');
   grid.innerHTML = '';
   document.getElementById('btn-phase-next').disabled = true;
   STAGES.forEach((stage, i) => {
     if (stage.hidden) return; // la batalla definitiva solo se alcanza con el "NO" del Admin
+    const unlocked = isStageUnlocked(stage);
     const card = document.createElement('div');
-    card.className = 'pick-card';
+    card.className = 'pick-card' + (unlocked ? '' : ' locked');
     card.innerHTML = `<canvas class="pick-card-canvas" width="180" height="100"></canvas>
       <div class="pick-card-name">${stage.special ? 'MODO ESPECIAL' : 'ETAPA ' + stage.id} — ${stage.name}</div>
       <div class="pick-card-desc">${stage.objectiveText}</div>
-      <div class="pick-check">✔ SELECCIONADA</div>`;
+      <div class="pick-check">✔ SELECCIONADA</div>
+      ${unlocked ? '' : '<div class="pick-lock"><span class="pick-lock-icon">🔒</span><span class="pick-lock-text">Supera esta etapa jugando para desbloquearla</span></div>'}`;
     const cv = card.querySelector('canvas');
     drawPreview(cv, c => {
       if (stage.special) {
@@ -1499,6 +1518,7 @@ function buildPhaseGrid() {
       }
     });
     card.addEventListener('click', () => {
+      if (!unlocked) return; // etapa bloqueada: no se puede elegir
       grid.querySelectorAll('.pick-card').forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
       GAME.phaseSkipTarget = i;
@@ -3630,6 +3650,7 @@ function runBossCutscene(level) {
 }
 
 function advanceStage() {
+  markStageCleared(STAGES[GAME.stageIndex]); // etapa superada: se desbloquea en el salto de fase
   cancelAnimationFrame(GAME.rafId);
   stopBossMusic();
   if (mpIsActive()) { MP.readyChoices = {}; MP.remoteStates = {}; MP._doneIds = []; } // que no queden "listos" ni eliminados de la fase anterior
@@ -3650,6 +3671,7 @@ function advanceStage() {
 // y su pantalla cambia sola en cuanto el Admin decide (ver mpChooseEnding
 // y el manejador de 'ending').
 function showPotionChoiceScreen() {
+  markStageCleared(STAGES[GAME.stageIndex]);
   const isGuest = mpIsActive() && !MP.isHost;
   const btns = document.getElementById('potion-buttons');
   const waiting = document.getElementById('potion-waiting');
