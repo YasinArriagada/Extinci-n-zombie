@@ -1032,6 +1032,7 @@ function mpBuildPosPayload(level) {
     y: Math.round(level.vehicle ? level.vehicle.y : level.player.y),
     angle: +(level.vehicle ? level.vehicle.angle : level.player.angle).toFixed(2),
     aimAngle: +level.player.angle.toFixed(2),
+    fa: +(level.player.moveAngle || 0).toFixed(2), // hacia dónde quiere ir (para dibujar el volteo de la montura)
     vehicleDef: level.vehicle ? level.vehicle.def : null,
     vehicleColor: level.vehicle ? level.vehicle.mpColor : null,
     charId: GAME.selection.character ? GAME.selection.character.id : null,
@@ -1261,14 +1262,13 @@ function mpDrawRemotePlayers(ctx) {
       s._lx = s.rx; s._ly = s.ry;
       s._sp = (s._sp || 0) + ((mv > 0.15 ? 1 : 0) - (s._sp || 0)) * 0.2;
       s._ph = (s._ph || 0) + mv * 0.16;
-      const td = ((s.angle - s.ra + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-      s._tn = (s._tn || 0) + (td - (s._tn || 0)) * 0.2; } // animación de los demás jugadores según lo que se mueven en pantalla
+      stepVisualHeading(s._anim || (s._anim = {}), s.fa !== undefined ? s.fa : s.angle, 0.25, 0.3); } // animación de los demás jugadores según lo que se mueven en pantalla
     s.rAim = lerpAngle(s.rAim, s.aimAngle !== undefined ? s.aimAngle : s.angle, k);
     ctx.save();
     if (s.dead) ctx.globalAlpha = 0.35; // cuerpo apagado para el jugador eliminado
     if (s.vehicleDef) {
       const remoteRider = { id: s.charId, color: s.charColor, accent: s.charAccent, aimAngle: s.rAim };
-      drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider, Object.assign(s._anim || (s._anim = {}), { ph: s._ph || 0, sp: s._sp || 0, turn: s._tn || 0 }));
+      drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider, Object.assign(s._anim || (s._anim = {}), { ph: s._ph || 0, sp: s._sp || 0 }));
     }
     else drawHuman(ctx, s.rx, s.ry, s.ra, s.charColor, s.charAccent, 1, s.charId);
     ctx.restore();
@@ -1764,13 +1764,20 @@ function charImage(id) {
   return (img.complete && img.naturalWidth > 0) ? img : null;
 }
 CHARACTERS.forEach(c => charImage(c.id)); // precarga
+// Escala de la montura que se está dibujando (antes de espejarla), para poder dibujar al jinete derecho.
+let CUR_Z = null;
+// Deja el lienzo sin giro ni espejo, conservando posición y escala: lo que se dibuje queda derecho en pantalla.
+function uprightFrame(ctx) {
+  const m = ctx.getTransform();
+  const z = CUR_Z || Math.hypot(m.a, m.b);
+  ctx.setTransform(z, 0, 0, z, m.e, m.f);
+}
 // Dibuja el personaje siempre derecho (sin girar con la montura): bottomY = donde apoyan los pies, h = alto.
 function drawChibiUpright(ctx, charId, h, bottomY, tilt, sx, crop) {
   const img = charImage(charId);
   if (!img) return false;
-  const m = ctx.getTransform();
   ctx.save();
-  ctx.rotate(-Math.atan2(m.b, m.a));
+  uprightFrame(ctx);
   const w = h * img.naturalWidth / img.naturalHeight;
   if (crop) { ctx.beginPath(); ctx.rect(-w, bottomY - h - 4, w * 2, h * (1 - crop) + 4); ctx.clip(); } // sentado: las piernas quedan ocultas tras la montura
   ctx.translate(0, bottomY - h * (crop || 0));
@@ -1851,21 +1858,20 @@ function drawRiderZombie(ctx, x, y, angle) {
 // su propia rotación local ya viene alineada con la dirección de puntería.
 // Sombra bajo el torso para que se vea sentado sobre la montura (derecha en pantalla, sin girar).
 function drawSeatShade(ctx, y, rx, ry) {
-  const m = ctx.getTransform();
   ctx.save();
-  ctx.rotate(-Math.atan2(m.b, m.a));
+  uprightFrame(ctx);
   ctx.fillStyle = 'rgba(0,0,0,0.32)';
   ctx.beginPath(); ctx.ellipse(0, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 }
-function drawRiderFigure(ctx, bodyColor, accent, charId, tilt, sx) {
+function drawRiderFigure(ctx, bodyColor, accent, charId, tilt, sx, aim) {
   ctx.save();
   if (charImage(charId)) {
     drawChibiUpright(ctx, charId, 38, 9, tilt, sx, 0.3);
     drawSeatShade(ctx, -2, 9.5, 3.2);
     // arma en las manos, a la altura del pecho, apuntando hacia donde se dispara
-    const m = ctx.getTransform(), rot = Math.atan2(m.b, m.a);
-    ctx.rotate(-rot); ctx.translate(0, -13); ctx.rotate(rot);
+    const m = ctx.getTransform(), z = CUR_Z || Math.hypot(m.a, m.b);
+    ctx.setTransform(z, 0, 0, z, m.e, m.f - 13 * z); ctx.rotate(aim || 0);
     ctx.strokeStyle = '#20241c'; ctx.lineWidth = 3; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(17, 0); ctx.stroke();
     ctx.restore();
@@ -1888,6 +1894,20 @@ function drawRiderFigure(ctx, bodyColor, accent, charId, tilt, sx) {
   ctx.restore();
 }
 
+// Dirección visual de la montura. En vez de girar 180° pasando por "hacia abajo" al cambiar de izquierda a derecha,
+// la montura se VOLTEA como un espejo: th = ángulo ya reflejado (siempre cerca de la horizontal) y F = lado (+1 derecha, -1 izquierda).
+function stepVisualHeading(A, face, t, tF) {
+  const c = Math.cos(face);
+  if (Math.abs(c) > 0.2 || A.dir === undefined) A.dir = c >= 0 ? 1 : -1;
+  const norm = a => ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  const thT = norm(A.dir > 0 ? face : Math.PI - face);
+  if (A.th === undefined) { A.th = thT; A.F = A.dir; A.turn = 0; }
+  const d = norm(thT - A.th);
+  A.th = norm(A.th + d * t);
+  A.F += (A.dir - A.F) * tF;
+  A.turn = (A.turn || 0) + (d - (A.turn || 0)) * 0.3;
+}
+
 function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   ctx.save();
   ctx.translate(x, y);
@@ -1902,13 +1922,20 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
     ctx.shadowBlur = 0;
   }
   // El casco/cuerpo del vehículo rota según la dirección de movimiento (WASD).
+  const A = anim || { ph: 0, sp: 0 };
+  const mirrored = A.th !== undefined;
+  const thv = mirrored ? A.th : angle;              // giro del casco (ya reflejado si hay espejo)
+  const Fv = mirrored ? A.F : 1;                    // -1 = mirando a la izquierda (volteado como espejo)
+  const Fs = Fv < 0 ? -1 : 1;
+  const aTrue = Fs > 0 ? thv : Math.PI - thv;       // hacia dónde mira realmente la montura
+  const m0 = ctx.getTransform(); CUR_Z = Math.hypot(m0.a, m0.b);
   ctx.save();
-  ctx.rotate(angle);
+  ctx.scale(Math.abs(Fv) < 0.25 ? Fs * 0.25 : Fv, 1); // al voltearse se angosta un instante, nunca desaparece
+  ctx.rotate(thv);
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(0, 16, 26, 8, 0, 0, Math.PI * 2); ctx.fill();
   const [c1, c2] = v.pal;
   // Animación de marcha: A.ph = fase del paso (avanza con la distancia recorrida), A.sp = 0 parado .. 1 en marcha.
-  const A = anim || { ph: 0, sp: 0 };
   const sp = A.sp || 0, sw = Math.sin(A.ph);
   const idle = Math.sin(Date.now() / 420) * 0.7 * (1 - sp); // respiración al estar quieto
   const bobAmt = idle - Math.abs(sw) * sp * (v.kind === 'tank' ? 0.4 : v.kind === 'ball' ? 0.7 : 1.2); // rebote vertical (en pantalla)
@@ -1924,7 +1951,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
     const fv = A[key + 'F'];
     return Math.abs(fv) < 0.6 ? (fv >= 0 ? 0.6 : -0.6) : fv;
   };
-  ctx.translate(Math.sin(angle) * bobAmt, Math.cos(angle) * bobAmt); // el rebote siempre es vertical en pantalla
+  ctx.translate(Math.sin(thv) * bobAmt, Math.cos(thv) * bobAmt); // el rebote siempre es vertical en pantalla
   let riderSpot = null; // posición local (dentro del casco) donde va sentado el personaje
   switch (v.kind) {
     case 'dino':
@@ -2003,7 +2030,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
       // quieres disparar a un costado, el cañón (la "cosa larga") se ve
       // apuntando exactamente hacia ese lado, no hacia donde te mueves.
       ctx.save();
-      ctx.rotate(rider.aimAngle - angle);
+      ctx.rotate(Fs * (rider.aimAngle - aTrue));
       ctx.fillStyle = c1; ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#20241c'; ctx.fillRect(0, -3, 27, 6);
       // el artillero (tu personaje) asomado por la escotilla de la torreta
@@ -2018,11 +2045,12 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
       ctx.translate(riderSpot.dx, riderSpot.dy);
       // El personaje mantiene su lugar sobre la montura, pero su cuerpo/arma
       // se orienta hacia la puntería real (mouse), no hacia el movimiento.
-      ctx.rotate(rider.aimAngle - angle);
-      drawRiderFigure(ctx, rider.color, rider.accent, rider.id, lean, faceOf('v', angle));
+      ctx.rotate(Fs * (rider.aimAngle - aTrue));
+      drawRiderFigure(ctx, rider.color, rider.accent, rider.id, lean, Math.abs(Fv) < 0.6 ? Fs * 0.6 : Fv, rider.aimAngle);
       ctx.restore();
     }
   }
+  CUR_Z = null;
   ctx.restore(); // fin rotación del casco
   ctx.restore(); // fin save exterior
 }
@@ -2753,10 +2781,10 @@ function updateVehicle(level, dt) {
   const face = p.moveAngle || 0;
   // solo se suaviza la rotación visual; la posición sigue al jugador sin retraso.
   // Las monturas pesadas (tanque) giran más lento que las ligeras (velocirraptor, pelota).
-  const turnD = ((face - v.angle + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; // cuánto falta por girar
-  v.angle = lerpAngle(v.angle, face, clamp(dt * (5 + v.def.speed * 0.045), 0, 1));
+  const turnRate = clamp(dt * (5 + v.def.speed * 0.045), 0, 1);
+  v.angle = lerpAngle(v.angle, face, turnRate);
   if (!v.anim) v.anim = { ph: 0, sp: 0, turn: 0 };
-  v.anim.turn += (turnD - v.anim.turn) * clamp(dt * 10, 0, 1);
+  stepVisualHeading(v.anim, face, turnRate, clamp(dt * 14, 0, 1)); // lo que se ve: giro suave + volteo de izquierda a derecha
   v.anim.sp += ((moved > 0.15 ? 1 : 0) - v.anim.sp) * clamp(dt * 10, 0, 1);
   v.anim.ph += moved * 0.16;
   p.speed = v.def.speed;
