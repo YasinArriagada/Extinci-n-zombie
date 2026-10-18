@@ -1917,25 +1917,40 @@ const RAPTOR_VIEWS = {
   arriba:    { src: 'Aspectos/raptor-arriba.png',    w: 90,  h: 234, cx: 45,  cy: 117, sx: 45,  sy: 66 },
   abajo:     { src: 'Aspectos/raptor-abajo.png',     w: 151, h: 325, cx: 76,  cy: 163, sx: 76,  sy: 200 },
 };
-const RAPTOR_IMGS = {};
-function raptorImg(name) {
-  let i = RAPTOR_IMGS[name];
-  if (!i) { i = RAPTOR_IMGS[name] = new Image(); i.src = RAPTOR_VIEWS[name].src; }
+
+/* ---- T-Rex con imágenes (Aspectos/trex-*.png): mismas 4 vistas que el velocirraptor ---- */
+// (las imágenes ya están reducidas: 416 px de ancho en vista lateral -> unos 104 px en el juego)
+const TREX_VIEWS = {
+  izquierda: { src: 'Aspectos/trex-izquierda.png', w: 416, h: 235, cx: 208, cy: 125, sx: 214, sy: 46 },
+  derecha:   { src: 'Aspectos/trex-derecha.png',   w: 418, h: 235, cx: 209, cy: 125, sx: 202, sy: 46 },
+  arriba:    { src: 'Aspectos/trex-arriba.png',    w: 179, h: 300, cx: 89,  cy: 150, sx: 91,  sy: 128 },
+  abajo:     { src: 'Aspectos/trex-abajo.png',     w: 177, h: 432, cx: 88,  cy: 205, sx: 88,  sy: 216 }, // mira hacia abajo, vista desde arriba
+};
+// Aspectos de montura con imágenes: k = escala, shV/shS = tamaño de la sombra (vista vertical / lateral)
+const DINO_SKINS = {
+  raptor: { k: RAPTOR_K, views: RAPTOR_VIEWS, shV: [13, 26], shS: 36 },
+  trex:   { k: 0.25,     views: TREX_VIEWS,   shV: [20, 40], shS: 50 },
+};
+const DINO_IMGS = {};
+function dinoImg(skin, name) {
+  const src = skin.views[name].src;
+  let i = DINO_IMGS[src];
+  if (!i) { i = DINO_IMGS[src] = new Image(); i.src = src; }
   return (i.complete && i.naturalWidth > 0) ? i : null;
 }
-Object.keys(RAPTOR_VIEWS).forEach(raptorImg); // precarga
+Object.keys(DINO_SKINS).forEach(id => Object.keys(DINO_SKINS[id].views).forEach(n => dinoImg(DINO_SKINS[id], n))); // precarga
 
-// Dibuja la montura-raptor (y a su jinete sentado en la silla). Devuelve false si las imágenes aún no cargaron.
-function drawRaptorMount(ctx, A, aDefault, rider) {
+// Dibuja una montura con imágenes (raptor o T-Rex) y a su jinete sentado en la silla. Devuelve false si las imágenes aún no cargaron.
+function drawDinoMount(ctx, A, aDefault, rider, skin) {
   const Fv = A.F === undefined ? 1 : A.F, Fs = Fv < 0 ? -1 : 1;
   const aT = A.th !== undefined ? (A.dir > 0 ? A.th : Math.PI - A.th) : aDefault; // hacia dónde mira
   const sA = Math.sin(aT);
   const vert = (A.rv === 'v') ? Math.abs(sA) > 0.62 : Math.abs(sA) > 0.78; // vista de arriba/abajo solo si va casi vertical
   A.rv = vert ? 'v' : 's';
   const name = vert ? (sA < 0 ? 'arriba' : 'abajo') : (Fs > 0 ? 'derecha' : 'izquierda');
-  const img = raptorImg(name);
+  const img = dinoImg(skin, name);
   if (!img) return false;
-  const d = RAPTOR_VIEWS[name], K = RAPTOR_K;
+  const d = skin.views[name], K = skin.k;
   const sp = A.sp || 0, sw = Math.sin(A.ph || 0);
   const bob = Math.sin(Date.now() / 420) * 0.7 * (1 - sp) - Math.abs(sw) * sp * 1.2;
   const sqz = vert ? 1 : (Math.abs(Fv) < 1 ? Math.max(Math.abs(Fv), 0.25) : 1); // al cambiar de lado se voltea de golpe, sin girar por abajo
@@ -1945,7 +1960,7 @@ function drawRaptorMount(ctx, A, aDefault, rider) {
   // sombra en el suelo
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath();
-  if (vert) ctx.ellipse(2, 4, 13, 26, 0, 0, Math.PI * 2); else ctx.ellipse(0, (d.h - d.cy) * K - 2, 36 * sqz, 6.5, 0, 0, Math.PI * 2);
+  if (vert) ctx.ellipse(2, 4, skin.shV[0], skin.shV[1], 0, 0, Math.PI * 2); else ctx.ellipse(0, (d.h - d.cy) * K - 2, skin.shS * sqz, 6.5, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.save(); ctx.scale(sqz, 1); ctx.drawImage(img, -d.cx * K, -d.cy * K, d.w * K, d.h * K); ctx.restore();
   if (rider) {
@@ -1980,7 +1995,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   const Fs = Fv < 0 ? -1 : 1;
   const aTrue = Fs > 0 ? thv : Math.PI - thv;       // hacia dónde mira realmente la montura
   const m0 = ctx.getTransform(); CUR_Z = Math.hypot(m0.a, m0.b);
-  if (v.id === 'raptor' && drawRaptorMount(ctx, A, angle, rider)) { CUR_Z = null; ctx.restore(); return; }
+  if (DINO_SKINS[v.id] && drawDinoMount(ctx, A, angle, rider, DINO_SKINS[v.id])) { CUR_Z = null; ctx.restore(); return; }
   ctx.save();
   ctx.scale(Math.abs(Fv) < 0.25 ? Fs * 0.25 : Fv, 1); // al voltearse se angosta un instante, nunca desaparece
   ctx.rotate(thv);
