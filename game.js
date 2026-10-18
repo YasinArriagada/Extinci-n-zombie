@@ -192,10 +192,10 @@ const GAME = {
 // Música específica por etapa: agrega aquí más entradas si quieres música
 // en otras fases (la clave es el "key" de la etapa, ver STAGES más arriba).
 const STAGE_MUSIC = {
-  absurd: 'Avion.mp3',        // Fase 3 — VEHÍCULOS ABSURDOS
-  final: 'Music_robot.mp3',   // Fase 5 — BATALLA FINAL
-  finalx: 'Music_robot.mp3',  // BATALLA DEFINITIVA (tras el "NO" del Admin)
-  kills: 'Modo Especial.mp3', // MODO ESPECIAL — RECOLECCIÓN DE BAJAS (suena hasta que cae el último jugador)
+  absurd: 'Musica/Avion.mp3',        // Fase 3 — VEHÍCULOS ABSURDOS
+  final: 'Musica/Music_robot.mp3',   // Fase 5 — BATALLA FINAL
+  finalx: 'Musica/Music_robot.mp3',  // BATALLA DEFINITIVA (tras el "NO" del Admin)
+  kills: 'Musica/Modo Especial.mp3', // MODO ESPECIAL — RECOLECCIÓN DE BAJAS (suena hasta que cae el último jugador)
 };
 
 const MUSIC = new Audio();
@@ -233,7 +233,7 @@ function stopBossMusic() {
   MUSIC.currentTime = 0;
 }
 
-const MENU_MUSIC = new Audio('Menu.mp3');
+const MENU_MUSIC = new Audio('Musica/Menu.mp3');
 MENU_MUSIC.loop = true;
 MENU_MUSIC.volume = GAME.settings.music / 100;
 
