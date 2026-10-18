@@ -1932,8 +1932,8 @@ const TREX_IMG = {
 const TREX_VIEWS = {
   izquierda: { src: TREX_IMG.izquierda, w: 416, h: 235, cx: 208, cy: 125, sx: 214, sy: 46 },
   derecha:   { src: TREX_IMG.derecha,   w: 418, h: 235, cx: 209, cy: 125, sx: 202, sy: 46 },
-  arriba:    { src: TREX_IMG.arriba,    w: 179, h: 300, cx: 89,  cy: 150, sx: 91,  sy: 128 },
-  abajo:     { src: TREX_IMG.abajo,     w: 177, h: 432, cx: 88,  cy: 205, sx: 88,  sy: 216 }, // mira hacia abajo, vista desde arriba
+  arriba:    { src: TREX_IMG.arriba,    w: 179, h: 300, cx: 89,  cy: 150, sx: 91,  sy: 104 },
+  abajo:     { src: TREX_IMG.abajo,     w: 177, h: 432, cx: 88,  cy: 205, sx: 88,  sy: 240 }, // mira hacia abajo, vista desde arriba
 };
 // Aspectos de montura con imágenes: k = escala, shV/shS = tamaño de la sombra (vista vertical / lateral)
 const DINO_SKINS = {
