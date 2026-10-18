@@ -195,7 +195,7 @@ const STAGE_MUSIC = {
   absurd: 'Avion.mp3',        // Fase 3 — VEHÍCULOS ABSURDOS
   final: 'Music_robot.mp3',   // Fase 5 — BATALLA FINAL
   finalx: 'Music_robot.mp3',  // BATALLA DEFINITIVA (tras el "NO" del Admin)
-  kills: 'Music_robot.mp3',   // MODO ESPECIAL — RECOLECCIÓN DE BAJAS
+  kills: 'Modo_Especial.mp3', // MODO ESPECIAL — RECOLECCIÓN DE BAJAS (suena hasta que cae el último jugador)
 };
 
 const MUSIC = new Audio();
