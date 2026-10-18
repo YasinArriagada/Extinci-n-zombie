@@ -101,10 +101,10 @@ const STAGES = [
     id: 4, key: 'animal', name: 'ANIMALES',
     vehicleSet: 'animal', vehicleLabel: 'CRIATURA', requireWeapons: false,
     resource: null, canRepair: false,
-    objectiveType: 'survive', surviveKillTarget: 25,
+    objectiveType: 'survive', surviveKillTarget: 50, surviveKillTargetMP: 100,
     zombieTypes: ['rider'],
     palette: { ground: '#241c14', accent: '#302418' },
-    objectiveText: 'Elimina 25 zombies para llenar la barra al 100% y luego dirígete a la zona segura. La criatura no puede repararse.',
+    objectiveText: 'Elimina 50 zombies (100 en multijugador) para llenar la barra al 100% y luego dirígete a la zona segura. La criatura no puede repararse.',
   },
   {
     id: 5, key: 'final', name: 'BATALLA FINAL',
@@ -1684,6 +1684,9 @@ function stageObjectiveText(stage) {
       ? `Encuentren a la familia perdida (${names.join(', ')}) — cada jugador rescata a uno solo y lo escolta a la zona segura.`
       : stage.objectiveText;
   }
+  if (stage.objectiveType === 'survive' && mpIsActive()) {
+    return 'Entre todo el equipo deben eliminar 100 zombies (el conteo es compartido) para llenar la barra al 100% y luego dirigirse a la zona segura. La criatura no puede repararse.';
+  }
   return stage.objectiveText;
 }
 
@@ -2259,6 +2262,11 @@ function seedLevelEntities(level) {
   }
 }
 
+// Meta de bajas de la etapa 'survive': 50 en solitario, 100 en multijugador.
+function surviveGoal(stage) {
+  return (mpIsActive() && stage.surviveKillTargetMP) ? stage.surviveKillTargetMP : stage.surviveKillTarget;
+}
+
 function spawnZombie(level) {
   const type = choice(level.stage.objectiveType === 'killStreak' ? killStreakTypes(level) : level.stage.zombieTypes);
   const edge = randi(0, 3);
@@ -2272,7 +2280,7 @@ function spawnZombie(level) {
   level.zombies.push({
     id: level.nextZombieId,
     x, y, type, hp: Math.round((type === 'rider' ? 60 : 42) * zhp), maxHp: Math.round((type === 'rider' ? 60 : 42) * zhp),
-    speed: type === 'rider' ? rand(110, 150) : rand(48, 82),
+    speed: type === 'rider' ? rand(175, 225) : rand(48, 82),
     angle: 0, cd: rand(0, 1), hit: 0, alive: true,
   });
 }
@@ -3596,7 +3604,7 @@ function checkStageCompletion(level) {
     done = !!level.airBossDone && potionSecured && inSafeZone;
   }
   if (stage.objectiveType === 'survive') {
-    const killTargetReached = level.killsThisStage >= stage.surviveKillTarget;
+    const killTargetReached = level.killsThisStage >= surviveGoal(stage);
     const inSafeZone = killTargetReached && dist(level.player.x, level.player.y, level.safeZone.x, level.safeZone.y) < level.safeZone.r;
     done = killTargetReached && inSafeZone;
   }
@@ -4398,10 +4406,11 @@ function updateHUD(level) {
         `RECOLECCIÓN DE BAJAS (${killDiffCfg(level).label}) — Bajas: ${level.killsThisStage}  ·  Tiempo: ${mm}:${ss}  ·  Mejor: ${Math.max(level._best, level.killsThisStage)}`;
     }
   } else if (level.stage.objectiveType === 'survive') {
-    const pct = Math.min(100, Math.round(level.killsThisStage / level.stage.surviveKillTarget * 100));
-    document.getElementById('hud-objective').textContent = level.killsThisStage >= level.stage.surviveKillTarget
+    const goal = surviveGoal(level.stage);
+    const pct = Math.min(100, Math.round(level.killsThisStage / goal * 100));
+    document.getElementById('hud-objective').textContent = level.killsThisStage >= goal
       ? '¡Objetivo cumplido! Ve a la zona segura'
-      : `ZOMBIES ELIMINADOS: ${level.killsThisStage}/${level.stage.surviveKillTarget}  ·  ${pct}%`;
+      : `ZOMBIES ELIMINADOS: ${level.killsThisStage}/${goal}  ·  ${pct}%`;
   } else if (level.stage.objectiveType === 'rescue') {
     document.getElementById('hud-objective').textContent = level.rescuedThisStage >= level.rescueTarget
       ? 'Todos rescatados. ¡Ve a la zona segura!'
