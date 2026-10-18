@@ -6,10 +6,10 @@
  * Si agregas archivos nuevos al juego (música, imágenes), añádelos a CORE y sube CACHE_VERSION.
  * El código (html, js, css, json) y las imágenes se actualizan solos al abrir el juego con internet.
  */
-const CACHE_VERSION = 'v19';
+const CACHE_VERSION = 'v20';
 const CACHE = 'extincion-zombie-' + CACHE_VERSION;
 const CORE = [
-  './', 'index.html', 'game.js', 'style.css', 'Imagenes/favicon.svg', 'Aspectos/personaje-hombre.png', 'Aspectos/personaje-mujer.png', 'Aspectos/raptor-izquierda.png', 'Aspectos/raptor-derecha.png', 'Aspectos/raptor-arriba.png', 'Aspectos/raptor-abajo.png', 'Aspectos/trex-izquierda.png', 'Aspectos/trex-derecha.png', 'Aspectos/trex-arriba.png', 'Aspectos/trex-abajo.png',
+  './', 'index.html', 'game.js', 'style.css', 'Imagenes/favicon.svg', 'Aspectos/personaje-hombre.png', 'Aspectos/personaje-mujer.png', 'Aspectos/raptor-izquierda.png', 'Aspectos/raptor-derecha.png', 'Aspectos/raptor-arriba.png', 'Aspectos/raptor-abajo.png',
   'Musica/Menu.mp3', 'Musica/Avion.mp3', 'Musica/Music_robot.mp3', 'Musica/Modo Especial.mp3', 'Musica/Etapa 4.mp3', 'Imagenes/mementomori.jpeg', 'Imagenes/yo.jpeg', 'Imagenes/Emo.jfif',
   'manifest.json', 'Imagenes/icon-192 (1).png', 'Imagenes/icon-512 (1).png', 'Imagenes/icon-512-maskable.png',
 ];
