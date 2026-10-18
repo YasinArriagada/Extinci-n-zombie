@@ -40,7 +40,7 @@ const VEHICLE_SETS = {
   dino: [
     { id: 'raptor',   name: 'VELOCIRRAPTOR', hp: 130, speed: 235, desc: 'Rápido pero frágil.', kind: 'dino', pal: ['#3f7a34', '#274d20'] },
     { id: 'trex',     name: 'T-REX',         hp: 200, speed: 175, desc: 'Equilibrio entre fuerza y velocidad.', kind: 'dino', pal: ['#6a5a2b', '#3f341a'] },
-    { id: 'tricera',  name: 'TRICERATOPS',   hp: 270, speed: 140, desc: 'Lento pero muy resistente.', kind: 'dino', pal: ['#4a6b6b', '#2c4141'] },
+    { id: 'parasaurolophus', name: 'PARASAUROLOPHUS', hp: 270, speed: 140, desc: 'Lento pero muy resistente.', kind: 'dino', pal: ['#4a6b6b', '#2c4141'] },
   ],
   tank: [
     { id: 'beute', name: 'BEUTEPANZER', hp: 260, speed: 118, desc: 'Blindaje capturado, versátil.', kind: 'tank', pal: ['#4a4f3f', '#2c2f26'] },
@@ -2045,6 +2045,10 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
       ctx.beginPath(); ctx.ellipse(24, -8, 9, 7, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#d1272d';
       ctx.beginPath(); ctx.arc(28, -10, 1.6, 0, Math.PI * 2); ctx.fill();
+      if (v.id === 'parasaurolophus') { // cresta tubular que se curva hacia atrás
+        ctx.strokeStyle = c2; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(25, -14); ctx.quadraticCurveTo(22, -27, 5, -23); ctx.stroke();
+      }
       ctx.strokeStyle = c1; ctx.lineWidth = 5; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(-24, 4); ctx.lineTo(-24 + swing, 16); ctx.moveTo(-8, 6); ctx.lineTo(-8 - swing, 18); ctx.stroke();
       riderSpot = { dx: -2, dy: -9 };
