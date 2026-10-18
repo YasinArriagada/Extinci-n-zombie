@@ -1485,6 +1485,9 @@ function clearedStages() {
 }
 function markStageCleared(stage) {
   if (!stage || stage.special || stage.hidden) return;
+  // Solo cuenta en partida normal (JUGAR, empezando desde la etapa 1) y en solitario:
+  // lo jugado tras un salto de fase o en multijugador no desbloquea nada.
+  if (mpIsActive() || GAME.skipEntry) return;
   const a = clearedStages().slice();
   if (a.includes(stage.id)) return;
   a.push(stage.id);
