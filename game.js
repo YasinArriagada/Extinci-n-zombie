@@ -1475,18 +1475,21 @@ function fullReset() {
 
 /* ---------------------------- SALTO DE FASE --------------------------------- */
 
-// Etapas superadas (se guardan en el dispositivo). El salto de fase solo deja elegir las que ya
-// se superaron jugando; el modo especial (special) siempre está disponible.
+// Etapas superadas SOLO durante esta sesión: al cerrar la pestaña o la app instalada se vuelven a
+// bloquear (sessionStorage se borra al cerrar). Si el navegador no permite sessionStorage, se usa memoria.
 const UNLOCK_KEY = 'ez_stages_cleared';
+let _clearedMem = [];
+try { localStorage.removeItem(UNLOCK_KEY); } catch (e) { /* borra el progreso guardado en versiones anteriores */ }
 function clearedStages() {
-  try { const a = JSON.parse(localStorage.getItem(UNLOCK_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  try { const a = JSON.parse(sessionStorage.getItem(UNLOCK_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return _clearedMem; }
 }
 function markStageCleared(stage) {
   if (!stage || stage.special || stage.hidden) return;
-  const a = clearedStages();
+  const a = clearedStages().slice();
   if (a.includes(stage.id)) return;
   a.push(stage.id);
-  try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(a)); } catch (e) { /* sin almacenamiento: no pasa nada */ }
+  _clearedMem = a;
+  try { sessionStorage.setItem(UNLOCK_KEY, JSON.stringify(a)); } catch (e) { /* queda en memoria */ }
 }
 function isStageUnlocked(stage) {
   return !!stage.special || clearedStages().includes(stage.id);
