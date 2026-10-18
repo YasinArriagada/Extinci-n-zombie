@@ -1617,6 +1617,7 @@ function buildVehicleGrid(stage) {
   } else {
     colorPicker.style.display = 'none';
   }
+  DINO_REPAINT.clear();
   VEHICLE_SETS[stage.vehicleSet].forEach(v => {
     const card = document.createElement('div');
     card.className = 'pick-card';
@@ -1625,7 +1626,8 @@ function buildVehicleGrid(stage) {
       <div class="pick-card-desc">${v.desc}<br>Vida ${v.hp} · Vel ${v.speed}</div>
       <div class="pick-check">✔ SELECCIONADO</div>`;
     const cv = card.querySelector('canvas');
-    drawPreview(cv, c => drawVehicle(c, 90, 55, 0, v, 1.15));
+    const paintCard = () => drawPreview(cv, c => drawVehicle(c, 90, 55, 0, v, 1.15));
+    paintCard(); DINO_REPAINT.add(paintCard);
     card.addEventListener('click', () => {
       grid.querySelectorAll('.pick-card').forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
@@ -1921,8 +1923,8 @@ const RAPTOR_VIEWS = {
 /* ---- T-Rex con imágenes (Aspectos/trex-*.png): mismas 4 vistas que el velocirraptor ---- */
 // (las imágenes ya están reducidas: 416 px de ancho en vista lateral -> unos 104 px en el juego)
 const TREX_VIEWS = {
-  izquierda: { src: 'Aspectos/trex-izquierda.png', w: 416, h: 235, cx: 208, cy: 125, sx: 214, sy: 46 },
-  derecha:   { src: 'Aspectos/trex-derecha.png',   w: 418, h: 235, cx: 209, cy: 125, sx: 202, sy: 46 },
+  izquierda: { src: 'Aspectos/trex-izquierda.png', alt: 'Aspectos/T-Rex_izquierda.png', w: 416, h: 235, cx: 208, cy: 125, sx: 214, sy: 46 },
+  derecha:   { src: 'Aspectos/trex-derecha.png', alt: 'Aspectos/T-Rex_derecha.png',   w: 418, h: 235, cx: 209, cy: 125, sx: 202, sy: 46 },
   arriba:    { src: 'Aspectos/trex-arriba.png',    w: 179, h: 300, cx: 89,  cy: 150, sx: 91,  sy: 128 },
   abajo:     { src: 'Aspectos/trex-abajo.png',     w: 177, h: 432, cx: 88,  cy: 205, sx: 88,  sy: 216 }, // mira hacia abajo, vista desde arriba
 };
@@ -1932,10 +1934,17 @@ const DINO_SKINS = {
   trex:   { k: 0.25,     views: TREX_VIEWS,   shV: [20, 40], shS: 50 },
 };
 const DINO_IMGS = {};
+const DINO_REPAINT = new Set(); // vistas previas (selección de vehículo) que se repintan cuando una imagen termina de cargar
 function dinoImg(skin, name) {
-  const src = skin.views[name].src;
+  const view = skin.views[name], src = view.src;
   let i = DINO_IMGS[src];
-  if (!i) { i = DINO_IMGS[src] = new Image(); i.src = src; }
+  if (!i) {
+    i = DINO_IMGS[src] = new Image();
+    // si no existe el archivo con el nombre principal, se prueba con el alternativo
+    i.onerror = () => { if (view.alt && !i._triedAlt) { i._triedAlt = true; i.src = view.alt; } };
+    i.onload = () => DINO_REPAINT.forEach(f => { try { f(); } catch (e) {} });
+    i.src = src;
+  }
   return (i.complete && i.naturalWidth > 0) ? i : null;
 }
 Object.keys(DINO_SKINS).forEach(id => Object.keys(DINO_SKINS[id].views).forEach(n => dinoImg(DINO_SKINS[id], n))); // precarga
