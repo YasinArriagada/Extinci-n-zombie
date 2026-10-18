@@ -1400,6 +1400,7 @@ function handleAction(action, btn) {
       break;
     case 'back-menu': GAME.phaseSkip = false; showScreen('screen-menu'); break;
     case 'goto-vehicle':
+      if (!GAME.selection.character) break; // es obligatorio elegir personaje antes de pasar a la montura
       GAME.skipEntry = GAME.phaseSkip; GAME.vehBack = true;
       if (!GAME.phaseSkip) { GAME.stageIndex = 0; GAME.run = { rescued: 0, kills: 0, totalKills: 0 }; }
       GAME.phaseSkip = false;
@@ -1539,6 +1540,10 @@ function buildPhaseGrid() {
 function buildCharacterGrid() {
   const grid = document.getElementById('character-grid');
   grid.innerHTML = '';
+  // Cada vez que se abre esta pantalla hay que elegir personaje de nuevo: sin elección no se puede continuar.
+  GAME.selection.character = null;
+  const nextBtn = document.getElementById('btn-char-next');
+  if (nextBtn) nextBtn.disabled = true;
   CHARACTERS.forEach(ch => {
     const card = document.createElement('div');
     card.className = 'pick-card';
