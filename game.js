@@ -1034,6 +1034,7 @@ function mpBuildPosPayload(level) {
     aimAngle: +level.player.angle.toFixed(2),
     vehicleDef: level.vehicle ? level.vehicle.def : null,
     vehicleColor: level.vehicle ? level.vehicle.mpColor : null,
+    charId: GAME.selection.character ? GAME.selection.character.id : null,
     charColor: GAME.selection.character ? GAME.selection.character.color : '#e9e6d6',
     charAccent: GAME.selection.character ? GAME.selection.character.accent : '#5f8f2e',
     dead: !!level.dead,
@@ -1260,10 +1261,10 @@ function mpDrawRemotePlayers(ctx) {
     ctx.save();
     if (s.dead) ctx.globalAlpha = 0.35; // cuerpo apagado para el jugador eliminado
     if (s.vehicleDef) {
-      const remoteRider = { color: s.charColor, accent: s.charAccent, aimAngle: s.rAim };
+      const remoteRider = { id: s.charId, color: s.charColor, accent: s.charAccent, aimAngle: s.rAim };
       drawVehicle(ctx, s.rx, s.ry, s.ra, s.vehicleDef, 1, s.vehicleColor, remoteRider);
     }
-    else drawHuman(ctx, s.rx, s.ry, s.ra, s.charColor, s.charAccent, 1);
+    else drawHuman(ctx, s.rx, s.ry, s.ra, s.charColor, s.charAccent, 1, s.charId);
     ctx.restore();
     ctx.save();
     ctx.fillStyle = s.dead ? '#d1272d' : '#e9e6d6';
@@ -1743,10 +1744,48 @@ function drawPreview(canvas, fn) {
   fn(ctx);
 }
 
-function drawHuman(ctx, x, y, angle, bodyColor, accent, scale) {
+// Imágenes de los personajes (Aspectos/): se cargan una sola vez. Si aún no cargaron, se usa el dibujo simple.
+const CHAR_IMGS = {};
+function charImage(id) {
+  if (!id) return null;
+  let img = CHAR_IMGS[id];
+  if (!img) {
+    const def = CHARACTERS.find(c => c.id === id);
+    if (!def || !def.img) return null;
+    img = CHAR_IMGS[id] = new Image();
+    img.src = def.img;
+  }
+  return (img.complete && img.naturalWidth > 0) ? img : null;
+}
+CHARACTERS.forEach(c => charImage(c.id)); // precarga
+// Dibuja el personaje siempre derecho (sin girar con la montura): bottomY = donde apoyan los pies, h = alto.
+function drawChibiUpright(ctx, charId, h, bottomY) {
+  const img = charImage(charId);
+  if (!img) return false;
+  const m = ctx.getTransform();
+  ctx.save();
+  ctx.rotate(-Math.atan2(m.b, m.a));
+  const w = h * img.naturalWidth / img.naturalHeight;
+  ctx.drawImage(img, -w / 2, bottomY - h, w, h);
+  ctx.restore();
+  return true;
+}
+
+function drawHuman(ctx, x, y, angle, bodyColor, accent, scale, charId) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
+  if (charImage(charId)) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(0, 15, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
+    drawChibiUpright(ctx, charId, 40, 17);
+    // arma apuntando hacia donde se dispara
+    ctx.rotate(angle);
+    ctx.strokeStyle = '#20241c'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(8, 2); ctx.lineTo(22, 2); ctx.stroke();
+    ctx.restore();
+    return;
+  }
   // sombra
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(0, 14, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
@@ -1800,8 +1839,17 @@ function drawRiderZombie(ctx, x, y, angle) {
 // Dibuja al personaje (el que elegiste: hombre o mujer) montado/asomado en el
 // vehículo. Se llama ya posicionado y rotado en el punto donde debe ir sentado;
 // su propia rotación local ya viene alineada con la dirección de puntería.
-function drawRiderFigure(ctx, bodyColor, accent) {
+function drawRiderFigure(ctx, bodyColor, accent, charId) {
   ctx.save();
+  if (charImage(charId)) {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.ellipse(0, 5, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
+    drawChibiUpright(ctx, charId, 30, 7);
+    ctx.strokeStyle = '#20241c'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(18, 0); ctx.stroke();
+    ctx.restore();
+    return;
+  }
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.beginPath(); ctx.ellipse(0, 5, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
   // cuerpo/torso asomado
@@ -1916,16 +1964,19 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider) {
       ctx.fillStyle = c1; ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#20241c'; ctx.fillRect(0, -3, 27, 6);
       // el artillero (tu personaje) asomado por la escotilla de la torreta
-      ctx.fillStyle = rider.color; ctx.beginPath(); ctx.arc(-3, 0, 4.2, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = rider.accent; ctx.beginPath(); ctx.arc(-3, -3, 1.8, 0, Math.PI * 2); ctx.fill();
+      if (!charImage(rider.id)) {
+        ctx.fillStyle = rider.color; ctx.beginPath(); ctx.arc(-3, 0, 4.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = rider.accent; ctx.beginPath(); ctx.arc(-3, -3, 1.8, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.restore();
+      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 24, 4); ctx.restore(); }
     } else if (riderSpot) {
       ctx.save();
       ctx.translate(riderSpot.dx, riderSpot.dy);
       // El personaje mantiene su lugar sobre la montura, pero su cuerpo/arma
       // se orienta hacia la puntería real (mouse), no hacia el movimiento.
       ctx.rotate(rider.aimAngle - angle);
-      drawRiderFigure(ctx, rider.color, rider.accent);
+      drawRiderFigure(ctx, rider.color, rider.accent, rider.id);
       ctx.restore();
     }
   }
@@ -4160,11 +4211,11 @@ function render() {
   if (level.dead) ctx.globalAlpha = 0.35; // cuerpo apagado: este jugador ya fue eliminado
   if (level.vehicle) {
     const myRider = GAME.selection.character
-      ? { color: GAME.selection.character.color, accent: GAME.selection.character.accent, aimAngle: level.player.angle }
+      ? { id: GAME.selection.character.id, color: GAME.selection.character.color, accent: GAME.selection.character.accent, aimAngle: level.player.angle }
       : null;
     drawVehicle(ctx, level.vehicle.x, level.vehicle.y, level.vehicle.angle, level.vehicle.def, 1, level.vehicle.mpColor, myRider);
   }
-  else drawHuman(ctx, level.player.x, level.player.y, level.player.angle, GAME.selection.character.color, GAME.selection.character.accent, 1);
+  else drawHuman(ctx, level.player.x, level.player.y, level.player.angle, GAME.selection.character.color, GAME.selection.character.accent, 1, GAME.selection.character.id);
   ctx.restore();
   if (level.dead) {
     const selfPos = level.vehicle || level.player;
