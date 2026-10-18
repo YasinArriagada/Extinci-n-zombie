@@ -1915,7 +1915,7 @@ const RAPTOR_VIEWS = {
   izquierda: { src: 'Aspectos/raptor-izquierda.png', w: 354, h: 189, cx: 177, cy: 100, sx: 147, sy: 50 },
   derecha:   { src: 'Aspectos/raptor-derecha.png',   w: 344, h: 188, cx: 172, cy: 100, sx: 203, sy: 50 },
   arriba:    { src: 'Aspectos/raptor-arriba.png',    w: 90,  h: 234, cx: 45,  cy: 117, sx: 45,  sy: 66 },
-  abajo:     { src: 'Aspectos/raptor-abajo.png',     w: 98,  h: 234, cx: 49,  cy: 117, sx: 49,  sy: 55 },
+  abajo:     { src: 'Aspectos/raptor-abajo.png',     w: 158, h: 234, cx: 79,  cy: 117, sx: 79,  sy: 98 },
 };
 const RAPTOR_IMGS = {};
 function raptorImg(name) {
