@@ -1328,11 +1328,11 @@ function handleAction(action, btn) {
     case 'room-mode':
       if (btn && ROOM_MODES[btn.dataset.mode]) { MP.mode = btn.dataset.mode; updateRoomModeUI(); }
       break;
-    case 'goto-character': GAME.charBack = 'screen-mode-select'; buildCharacterGrid(); showScreen('screen-character'); break;
+    case 'goto-character': GAME.skipEntry = false; GAME.charBack = 'screen-mode-select'; buildCharacterGrid(); showScreen('screen-character'); break;
     case 'goto-settings': showScreen('screen-settings'); break;
     case 'goto-controls': showScreen('screen-controls'); break;
     case 'goto-credits': showScreen('screen-credits'); break;
-    case 'goto-mode-select': GAME.phaseSkip = false; updateKillsDiffUI(); showScreen('screen-mode-select'); break; // JUGAR siempre empieza desde la etapa 1
+    case 'goto-mode-select': GAME.phaseSkip = false; GAME.skipEntry = false; updateKillsDiffUI(); showScreen('screen-mode-select'); break; // JUGAR siempre empieza desde la etapa 1
     case 'goto-mp-join': {
       const modeErr = document.getElementById('mode-select-error');
       if (!mpIsOnline()) { if (modeErr) modeErr.textContent = MP_MSG_OFFLINE; break; } // sin internet no se entra
@@ -1372,7 +1372,7 @@ function handleAction(action, btn) {
       break;
     case 'goto-phase-select': buildPhaseGrid(); showScreen('screen-phase-select'); break;
     case 'phase-select-continue':
-      GAME.phaseSkip = true;
+      GAME.phaseSkip = true; GAME.skipEntry = true; // desde aquí la partida es con salto de fase: no desbloquea etapas
       GAME.stageIndex = GAME.phaseSkipTarget;
       GAME.run = { rescued: 0, kills: 0, totalKills: 0 };
       if (STAGES[GAME.stageIndex].special) {
@@ -1477,9 +1477,9 @@ function fullReset() {
 
 // Etapas superadas SOLO durante esta sesión: al cerrar la pestaña o la app instalada se vuelven a
 // bloquear (sessionStorage se borra al cerrar). Si el navegador no permite sessionStorage, se usa memoria.
-const UNLOCK_KEY = 'ez_stages_cleared';
+const UNLOCK_KEY = 'ez_stages_cleared_v2'; // clave nueva: ignora lo que guardaron versiones anteriores con reglas distintas
 let _clearedMem = [];
-try { localStorage.removeItem(UNLOCK_KEY); } catch (e) { /* borra el progreso guardado en versiones anteriores */ }
+try { localStorage.removeItem('ez_stages_cleared'); sessionStorage.removeItem('ez_stages_cleared'); } catch (e) { /* borra datos de versiones anteriores */ }
 function clearedStages() {
   try { const a = JSON.parse(sessionStorage.getItem(UNLOCK_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return _clearedMem; }
 }
