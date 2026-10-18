@@ -23,8 +23,8 @@ const choice = arr => arr[randi(0, arr.length - 1)];
 /* ------------------------------- DATOS ----------------------------------- */
 
 const CHARACTERS = [
-  { id: 'male',   name: 'RECLUTA MASCULINO', color: '#7d8c72', accent: '#c9d6bd', desc: 'Equilibrado. Puntería estable.' },
-  { id: 'female', name: 'RECLUTA FEMENINA',  color: '#c07a2e', accent: '#f0c98a', desc: 'Ágil. Recarga más rápida.' },
+  { id: 'male',   name: 'RECLUTA MASCULINO', color: '#7d8c72', accent: '#c9d6bd', desc: 'Equilibrado. Puntería estable.', img: 'Aspectos/personaje-hombre.png' },
+  { id: 'female', name: 'RECLUTA FEMENINA',  color: '#c07a2e', accent: '#f0c98a', desc: 'Ágil. Recarga más rápida.', img: 'Aspectos/personaje-mujer.png' },
 ];
 
 const WEAPONS = [
@@ -1548,12 +1548,10 @@ function buildCharacterGrid() {
   CHARACTERS.forEach(ch => {
     const card = document.createElement('div');
     card.className = 'pick-card';
-    card.innerHTML = `<canvas class="pick-card-canvas" width="180" height="100"></canvas>
+    card.innerHTML = `<img class="pick-card-img" src="${ch.img}" alt="${ch.name}" draggable="false">
       <div class="pick-card-name">${ch.name}</div>
       <div class="pick-card-desc">${ch.desc}</div>
       <div class="pick-check">✔ SELECCIONADO</div>`;
-    const cv = card.querySelector('canvas');
-    drawPreview(cv, c => drawHuman(c, 90, 60, 0, ch.color, ch.accent, 1.6));
     card.addEventListener('click', () => {
       grid.querySelectorAll('.pick-card').forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
