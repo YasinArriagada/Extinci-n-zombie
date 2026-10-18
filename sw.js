@@ -6,11 +6,11 @@
  * Si agregas archivos nuevos al juego (música, imágenes), añádelos a CORE y sube CACHE_VERSION.
  * El código (html, js, css, json) y las imágenes se actualizan solos al abrir el juego con internet.
  */
-const CACHE_VERSION = 'v8';
+const CACHE_VERSION = 'v9';
 const CACHE = 'extincion-zombie-' + CACHE_VERSION;
 const CORE = [
   './', 'index.html', 'game.js', 'style.css', 'favicon.svg',
-  'Musica/Menu.mp3', 'Musica/Avion.mp3', 'Musica/Music_robot.mp3', 'Musica/Modo Especial.mp3', 'mementomori.jpeg', 'yo.jpeg',
+  'Musica/Menu.mp3', 'Musica/Avion.mp3', 'Musica/Music_robot.mp3', 'Musica/Modo Especial.mp3', 'Musica/Etapa 4.mp3', 'mementomori.jpeg', 'yo.jpeg',
   'manifest.json', 'icon-192 (1).png', 'icon-512 (1).png', 'icon-512-maskable.png',
 ];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
