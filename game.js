@@ -2077,7 +2077,35 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   const aTrue = Fs > 0 ? thv : Math.PI - thv;       // hacia dónde mira realmente la montura
   const m0 = ctx.getTransform(); CUR_Z = Math.hypot(m0.a, m0.b);
   if (DINO_SKINS[v.id] && drawDinoMount(ctx, A, angle, rider, DINO_SKINS[v.id])) { CUR_Z = null; ctx.restore(); return; }
-  if (v.kind === 'tank' && TANK_IMG[v.id] && drawTankMount(ctx, A, rider, v)) { CUR_Z = null; ctx.restore(); return; }
+  if (v.kind === 'tank' && TANK_IMG[v.id] && drawTankMount(ctx, A, rider, v)) {
+    if (rider) {
+      // Torreta con cañón dibujada ENCIMA de la ilustración del tanque: rota de
+      // forma independiente al casco, siempre hacia donde apunta el mouse/joystick
+      // de puntería (igual que en el dibujo vectorial de respaldo), para que se vea
+      // exactamente hacia dónde estás apuntando aunque el tanque use su imagen real.
+      const [c1] = v.pal;
+      const lean = clamp((A.turn || 0) * 0.2, -0.14, 0.14);
+      const faceOf = (key, ang) => {
+        const c = Math.cos(ang);
+        if (Math.abs(c) > 0.25 || A[key + 'D'] === undefined) A[key + 'D'] = c >= 0 ? 1 : -1;
+        const f = A[key + 'F'] === undefined ? A[key + 'D'] : A[key + 'F'];
+        A[key + 'F'] = f + (A[key + 'D'] - f) * 0.3;
+        const fv = A[key + 'F'];
+        return Math.abs(fv) < 0.6 ? (fv >= 0 ? 0.6 : -0.6) : fv;
+      };
+      ctx.save();
+      ctx.rotate(Fs * (rider.aimAngle - aTrue));
+      ctx.fillStyle = c1; ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#20241c'; ctx.fillRect(0, -3, 27, 6);
+      if (!charImage(rider.id)) {
+        ctx.fillStyle = rider.color; ctx.beginPath(); ctx.arc(-3, 0, 4.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = rider.accent; ctx.beginPath(); ctx.arc(-3, -3, 1.8, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+      if (charImage(rider.id)) { ctx.save(); drawChibiUpright(ctx, rider.id, 33, 8, lean, faceOf('t', rider.aimAngle), 0.3); drawSeatShade(ctx, -1.5, 8.5, 3); ctx.restore(); }
+    }
+    CUR_Z = null; ctx.restore(); return;
+  }
   ctx.save();
   ctx.scale(Math.abs(Fv) < 0.25 ? Fs * 0.25 : Fv, 1); // al voltearse se angosta un instante, nunca desaparece
   ctx.rotate(thv);
