@@ -2022,6 +2022,39 @@ function drawDinoMount(ctx, A, aDefault, rider, skin) {
   return true;
 }
 
+// ---- Tanques con ilustración: se ve el mismo tanque que se elige en la selección. El personaje va DENTRO, así que no se dibuja. ----
+const TANK_IMGS = {};
+function tankImg(id) {
+  let i = TANK_IMGS[id];
+  if (!i) { i = TANK_IMGS[id] = new Image(); i.src = TANK_IMG[id]; }
+  return (i.complete && i.naturalWidth > 0) ? i : null;
+}
+Object.keys(TANK_IMG).forEach(tankImg); // precarga
+const TANK_DRAW_W = 90;      // ancho en pantalla (px de juego)
+const TANK_GUN_UP = 22;      // altura aprox. del cañón sobre el centro (para que las balas salgan de la boca del cañón)
+// Devuelve false si la imagen aún no cargó (entonces se usa el dibujo simple de siempre).
+function drawTankMount(ctx, A, rider, v) {
+  const img = tankImg(v.id);
+  if (!img) return false;
+  const K = TANK_DRAW_W / img.naturalWidth, w = TANK_DRAW_W, h = img.naturalHeight * K, cy = h * 0.62;
+  // La ilustración mira a la izquierda; se voltea hacia el lado al que apunta el cañón (puntería), con un giro corto.
+  const ang = rider ? rider.aimAngle : (A.th !== undefined ? (A.dir > 0 ? A.th : Math.PI - A.th) : 0);
+  const c = Math.cos(ang);
+  if (Math.abs(c) > 0.25 || A.tkD === undefined) A.tkD = c >= 0 ? 1 : -1;
+  const f0 = A.tkF === undefined ? A.tkD : A.tkF;
+  A.tkF = f0 + (A.tkD - f0) * 0.3;
+  const fv = Math.abs(A.tkF) < 0.25 ? (A.tkF >= 0 ? 0.25 : -0.25) : A.tkF;
+  const sp = A.sp || 0, sw = Math.sin(A.ph || 0);
+  const bob = Math.sin(Date.now() / 420) * 0.5 * (1 - sp) - Math.abs(sw) * sp * 0.8;
+  ctx.save();
+  ctx.translate(0, bob);
+  ctx.rotate(sw * 0.012 * sp * (fv >= 0 ? 1 : -1)); // leve cabeceo al avanzar
+  ctx.scale(-fv, 1);
+  ctx.drawImage(img, -w / 2, -cy, w, h);
+  ctx.restore();
+  return true;
+}
+
 function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   ctx.save();
   ctx.translate(x, y);
@@ -2044,6 +2077,7 @@ function drawVehicle(ctx, x, y, angle, v, scale, mpColor, rider, anim) {
   const aTrue = Fs > 0 ? thv : Math.PI - thv;       // hacia dónde mira realmente la montura
   const m0 = ctx.getTransform(); CUR_Z = Math.hypot(m0.a, m0.b);
   if (DINO_SKINS[v.id] && drawDinoMount(ctx, A, angle, rider, DINO_SKINS[v.id])) { CUR_Z = null; ctx.restore(); return; }
+  if (v.kind === 'tank' && TANK_IMG[v.id] && drawTankMount(ctx, A, rider, v)) { CUR_Z = null; ctx.restore(); return; }
   ctx.save();
   ctx.scale(Math.abs(Fv) < 0.25 ? Fs * 0.25 : Fv, 1); // al voltearse se angosta un instante, nunca desaparece
   ctx.rotate(thv);
@@ -2928,8 +2962,10 @@ function fireWeapon(level, w) {
   // así que la bala nace más adelante, justo en la punta del cañón (que ya
   // apunta hacia la puntería real, ver drawVehicle).
   const isTankTurret = level.vehicle && level.vehicle.def && level.vehicle.def.kind === 'tank';
-  const muzzleDist = isTankTurret ? 30 : 20;
-  const muzzleX = p.x + Math.cos(p.angle) * muzzleDist, muzzleY = p.y + Math.sin(p.angle) * muzzleDist;
+  const muzzleDist = isTankTurret ? 36 : 20;
+  // en el tanque, al apuntar hacia un lado la bala nace a la altura del cañón dibujado
+  const muzzleLift = isTankTurret ? TANK_GUN_UP * Math.abs(Math.cos(p.angle)) : 0;
+  const muzzleX = p.x + Math.cos(p.angle) * muzzleDist, muzzleY = p.y + Math.sin(p.angle) * muzzleDist - muzzleLift;
   const pellets = w.pellets || 1;
   for (let i = 0; i < pellets; i++) {
     const spread = (Math.random() - 0.5) * w.spread * 2;
